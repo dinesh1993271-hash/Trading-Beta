@@ -22,8 +22,24 @@ app.use(express.json());
 app.use(express.static(path.join(__dirname)));
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// SECTION 0 — ENV VALIDATION
+// SECTION 0 — ENV VALIDATION (with debug logging)
 // ═══════════════════════════════════════════════════════════════════════════════
+
+// DEBUG: Log all env vars that start with ANGEL or GROQ
+console.log('=== ENVIRONMENT VARIABLES DEBUG ===');
+for (const [key, val] of Object.entries(process.env)) {
+  if (key.startsWith('ANGEL') || key.startsWith('GROQ') || key === 'PORT') {
+    console.log(`${key}: ${val ? 'SET (' + val.substring(0, 4) + '...)' : 'NOT SET'}`);
+  }
+}
+console.log('=====================================');
+
+// Accept ANGEL_PIN as ANGEL_PASSWORD fallback
+if (!process.env.ANGEL_PASSWORD && process.env.ANGEL_PIN) {
+  process.env.ANGEL_PASSWORD = process.env.ANGEL_PIN;
+  console.log('ℹ️ Using ANGEL_PIN as ANGEL_PASSWORD');
+}
+
 const requiredEnv = ['ANGEL_API_KEY', 'ANGEL_CLIENT_ID', 'ANGEL_PASSWORD', 'ANGEL_TOTP_SECRET'];
 let demoMode = false;
 for (const env of requiredEnv) {
@@ -34,6 +50,8 @@ for (const env of requiredEnv) {
 }
 if (demoMode) {
   console.log('🎮 DEMO MODE — Using simulated market data');
+} else {
+  console.log('✅ LIVE MODE — Connecting to Angel One');
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
