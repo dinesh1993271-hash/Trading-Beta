@@ -1,1 +1,841 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>DineshTrade</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+<style>
+/* ─── Reset & Base ─────────────────────────────────────────────────── */
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:       #0a0b0f;
+  --bg2:      #111318;
+  --bg3:      #181b23;
+  --border:   #1e2130;
+  --border2:  #252a38;
+  --text:     #e2e6f0;
+  --muted:    #5a6080;
+  --accent:   #4fffb0;
+  --accent2:  #00d4ff;
+  --red:      #ff4d6d;
+  --green:    #4fffb0;
+  --yellow:   #ffd166;
+  --bull:     #4fffb0;
+  --bear:     #ff4d6d;
+  --mono:     'Space Mono', monospace;
+  --sans:     'DM Sans', sans-serif;
+}
+html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--sans);font-size:14px;line-height:1.5;overflow-x:hidden}
 
+/* ─── Layout ───────────────────────────────────────────────────────── */
+.app{display:flex;flex-direction:column;height:100%;max-width:480px;margin:0 auto;position:relative}
+
+/* ─── Header ───────────────────────────────────────────────────────── */
+header{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:14px 16px 10px;
+  border-bottom:1px solid var(--border);
+  position:sticky;top:0;z-index:100;
+  background:rgba(10,11,15,0.95);backdrop-filter:blur(12px);
+}
+.logo{font-family:var(--mono);font-size:15px;font-weight:700;letter-spacing:-.5px;color:var(--accent)}
+.logo span{color:var(--text);opacity:.5}
+.header-right{display:flex;align-items:center;gap:10px}
+.ws-dot{width:7px;height:7px;border-radius:50%;background:var(--muted);transition:background .3s}
+.ws-dot.live{background:var(--accent);box-shadow:0 0 6px var(--accent)}
+.paper-badge{
+  font-family:var(--mono);font-size:9px;padding:3px 7px;
+  border-radius:3px;border:1px solid rgba(255,209,102,.3);
+  color:var(--yellow);background:rgba(255,209,102,.06);letter-spacing:.5px
+}
+.live-badge{
+  font-family:var(--mono);font-size:9px;padding:3px 7px;
+  border-radius:3px;border:1px solid rgba(79,255,176,.3);
+  color:var(--accent);background:rgba(79,255,176,.06);letter-spacing:.5px
+}
+
+/* ─── Instrument Tabs ──────────────────────────────────────────────── */
+.tabs{
+  display:flex;gap:6px;padding:12px 16px 0;
+}
+.tab{
+  flex:1;padding:8px 0;font-family:var(--mono);font-size:11px;font-weight:700;
+  letter-spacing:.5px;text-align:center;border-radius:6px;cursor:pointer;
+  border:1px solid var(--border2);background:var(--bg2);color:var(--muted);
+  transition:all .2s;position:relative;
+}
+.tab.active{border-color:var(--accent);color:var(--accent);background:rgba(79,255,176,.06)}
+.tab-ltp{display:block;font-size:10px;font-weight:400;margin-top:2px;color:var(--muted)}
+.tab.active .tab-ltp{color:var(--accent);opacity:.7}
+.tab-dot{
+  position:absolute;top:5px;right:5px;
+  width:5px;height:5px;border-radius:50%;background:var(--muted)
+}
+.tab-dot.bull{background:var(--bull)}
+.tab-dot.bear{background:var(--bear)}
+
+/* ─── Main content ─────────────────────────────────────────────────── */
+.content{flex:1;overflow-y:auto;padding:12px 16px 80px}
+.content::-webkit-scrollbar{width:3px}
+.content::-webkit-scrollbar-track{background:transparent}
+.content::-webkit-scrollbar-thumb{background:var(--border2);border-radius:2px}
+
+/* ─── Price Card ───────────────────────────────────────────────────── */
+.price-card{
+  background:var(--bg2);border:1px solid var(--border);border-radius:12px;
+  padding:18px;margin-bottom:10px;position:relative;overflow:hidden;
+}
+.price-card::before{
+  content:'';position:absolute;top:0;left:0;right:0;height:2px;
+  background:linear-gradient(90deg,var(--accent),transparent);
+  opacity:.6;
+}
+.price-card.stale::before{background:linear-gradient(90deg,var(--yellow),transparent)}
+.inst-name{font-size:11px;color:var(--muted);font-family:var(--mono);letter-spacing:.5px;margin-bottom:6px;display:flex;align-items:center;gap:8px}
+.stale-tag{font-size:9px;color:var(--yellow);border:1px solid rgba(255,209,102,.3);padding:1px 5px;border-radius:2px}
+.price-main{font-family:var(--mono);font-size:34px;font-weight:700;letter-spacing:-1px;line-height:1}
+.price-change{display:flex;align-items:center;gap:8px;margin-top:6px}
+.change-val{font-family:var(--mono);font-size:13px;font-weight:700}
+.change-val.up{color:var(--green)}
+.change-val.dn{color:var(--red)}
+.price-meta{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:14px}
+.meta-item{background:var(--bg3);border-radius:6px;padding:7px 8px}
+.meta-label{font-size:9px;color:var(--muted);font-family:var(--mono);letter-spacing:.5px;margin-bottom:3px}
+.meta-val{font-family:var(--mono);font-size:12px;font-weight:700}
+.ts-line{font-size:10px;color:var(--muted);margin-top:10px;font-family:var(--mono)}
+
+/* ─── Signal Bar ───────────────────────────────────────────────────── */
+.signal-card{
+  background:var(--bg2);border:1px solid var(--border);border-radius:12px;
+  padding:14px;margin-bottom:10px;
+}
+.signal-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
+.signal-title{font-size:10px;color:var(--muted);font-family:var(--mono);letter-spacing:.5px}
+.signal-label{font-family:var(--mono);font-size:12px;font-weight:700}
+.signal-label.bull{color:var(--bull)}
+.signal-label.bear{color:var(--bear)}
+.signal-label.neutral{color:var(--muted)}
+.bull-bar-wrap{position:relative;height:6px;background:var(--bg3);border-radius:3px;overflow:hidden}
+.bull-bar-fill{
+  height:100%;border-radius:3px;
+  background:linear-gradient(90deg,var(--bear),var(--yellow) 50%,var(--bull));
+  width:100%;
+}
+.bull-bar-cursor{
+  position:absolute;top:-2px;width:3px;height:10px;background:#fff;
+  border-radius:2px;transform:translateX(-50%);transition:left .4s ease;
+  box-shadow:0 0 6px rgba(255,255,255,.4);
+}
+.signal-tags{display:flex;flex-wrap:wrap;gap:5px;margin-top:10px}
+.tag{
+  font-size:9px;font-family:var(--mono);padding:3px 7px;border-radius:3px;
+  border:1px solid var(--border2);color:var(--muted);letter-spacing:.3px;
+}
+.tag.active{color:var(--accent);border-color:rgba(79,255,176,.3);background:rgba(79,255,176,.05)}
+.tag.danger{color:var(--red);border-color:rgba(255,77,109,.3);background:rgba(255,77,109,.05)}
+
+/* ─── Open Trade ───────────────────────────────────────────────────── */
+.trade-card{
+  background:var(--bg2);border:1px solid var(--border);border-radius:12px;
+  padding:14px;margin-bottom:10px;
+}
+.trade-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+.trade-title{font-size:10px;color:var(--muted);font-family:var(--mono);letter-spacing:.5px}
+.trade-badge{
+  font-family:var(--mono);font-size:10px;padding:2px 8px;border-radius:3px;font-weight:700;
+}
+.trade-badge.call{color:var(--bull);border:1px solid rgba(79,255,176,.3);background:rgba(79,255,176,.08)}
+.trade-badge.put{color:var(--red);border:1px solid rgba(255,77,109,.3);background:rgba(255,77,109,.08)}
+.trade-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+.trade-item{background:var(--bg3);border-radius:6px;padding:7px 8px}
+.trade-lbl{font-size:9px;color:var(--muted);font-family:var(--mono);margin-bottom:3px;letter-spacing:.3px}
+.trade-val{font-family:var(--mono);font-size:12px;font-weight:700}
+.pnl-bar{height:3px;background:var(--bg3);border-radius:2px;margin:10px 0 8px;overflow:hidden}
+.pnl-fill{height:100%;border-radius:2px;transition:width .5s,background .3s}
+.btn-exit{
+  width:100%;padding:10px;font-family:var(--mono);font-size:11px;font-weight:700;
+  letter-spacing:.5px;border-radius:6px;cursor:pointer;border:none;
+  background:rgba(255,77,109,.1);border:1px solid rgba(255,77,109,.3);
+  color:var(--red);transition:all .2s;
+}
+.btn-exit:hover{background:rgba(255,77,109,.2)}
+.no-trade{
+  text-align:center;padding:20px;color:var(--muted);
+  font-family:var(--mono);font-size:11px;
+}
+
+/* ─── Bot Control ──────────────────────────────────────────────────── */
+.bot-card{
+  background:var(--bg2);border:1px solid var(--border);border-radius:12px;
+  padding:14px;margin-bottom:10px;
+}
+.bot-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
+.bot-title{font-size:10px;color:var(--muted);font-family:var(--mono);letter-spacing:.5px}
+.bot-status{font-family:var(--mono);font-size:10px}
+.bot-status.on{color:var(--accent)}
+.bot-status.off{color:var(--muted)}
+.bot-status.paused{color:var(--yellow)}
+.btn-row{display:flex;gap:6px}
+.btn{
+  flex:1;padding:10px;font-family:var(--mono);font-size:10px;font-weight:700;
+  letter-spacing:.5px;border-radius:6px;cursor:pointer;border:none;
+  transition:all .2s;
+}
+.btn-start{background:rgba(79,255,176,.1);border:1px solid rgba(79,255,176,.3);color:var(--accent)}
+.btn-start:hover{background:rgba(79,255,176,.2)}
+.btn-stop{background:rgba(255,77,109,.08);border:1px solid rgba(255,77,109,.25);color:var(--red)}
+.btn-stop:hover{background:rgba(255,77,109,.18)}
+.btn-resume{background:rgba(255,209,102,.08);border:1px solid rgba(255,209,102,.25);color:var(--yellow)}
+.btn-resume:hover{background:rgba(255,209,102,.18)}
+
+/* ─── Filter Log ───────────────────────────────────────────────────── */
+.log-card{
+  background:var(--bg2);border:1px solid var(--border);border-radius:12px;
+  padding:14px;margin-bottom:10px;
+}
+.log-title{font-size:10px;color:var(--muted);font-family:var(--mono);letter-spacing:.5px;margin-bottom:10px}
+.log-list{max-height:200px;overflow-y:auto}
+.log-list::-webkit-scrollbar{width:2px}
+.log-list::-webkit-scrollbar-thumb{background:var(--border2)}
+.log-row{
+  display:flex;gap:8px;align-items:flex-start;padding:6px 0;
+  border-bottom:1px solid var(--border);font-size:11px;
+}
+.log-row:last-child{border-bottom:none}
+.log-time{font-family:var(--mono);font-size:9px;color:var(--muted);white-space:nowrap;padding-top:2px}
+.log-key{font-family:var(--mono);font-size:9px;font-weight:700;color:var(--accent2);white-space:nowrap;padding-top:2px}
+.log-reason{color:var(--muted);font-size:10px;line-height:1.4}
+.empty-log{color:var(--muted);font-size:11px;font-family:var(--mono);padding:10px 0}
+
+/* ─── Trade History ────────────────────────────────────────────────── */
+.history-card{
+  background:var(--bg2);border:1px solid var(--border);border-radius:12px;
+  padding:14px;margin-bottom:10px;
+}
+.history-title{font-size:10px;color:var(--muted);font-family:var(--mono);letter-spacing:.5px;margin-bottom:10px;display:flex;justify-content:space-between;align-items:center}
+.stats-row{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:10px}
+.stat-box{background:var(--bg3);border-radius:6px;padding:8px}
+.stat-lbl{font-size:9px;color:var(--muted);font-family:var(--mono);letter-spacing:.3px;margin-bottom:3px}
+.stat-val{font-family:var(--mono);font-size:13px;font-weight:700}
+.stat-val.pos{color:var(--green)}
+.stat-val.neg{color:var(--red)}
+.history-list{max-height:240px;overflow-y:auto}
+.history-list::-webkit-scrollbar{width:2px}
+.history-list::-webkit-scrollbar-thumb{background:var(--border2)}
+.h-row{
+  display:flex;justify-content:space-between;align-items:center;
+  padding:8px 0;border-bottom:1px solid var(--border);
+}
+.h-row:last-child{border-bottom:none}
+.h-left{display:flex;flex-direction:column;gap:2px}
+.h-key{font-family:var(--mono);font-size:10px;font-weight:700}
+.h-key.call{color:var(--bull)}
+.h-key.put{color:var(--bear)}
+.h-detail{font-size:10px;color:var(--muted);font-family:var(--mono)}
+.h-pnl{font-family:var(--mono);font-size:12px;font-weight:700}
+.h-pnl.pos{color:var(--green)}
+.h-pnl.neg{color:var(--red)}
+
+/* ─── Bottom nav ───────────────────────────────────────────────────── */
+.bottom-nav{
+  position:fixed;bottom:0;left:50%;transform:translateX(-50%);
+  width:100%;max-width:480px;
+  display:flex;background:rgba(10,11,15,0.97);
+  border-top:1px solid var(--border);z-index:200;
+  backdrop-filter:blur(12px);
+}
+.nav-btn{
+  flex:1;padding:12px 0 14px;text-align:center;cursor:pointer;
+  border:none;background:transparent;color:var(--muted);
+  font-family:var(--sans);font-size:10px;font-weight:500;
+  transition:color .2s;
+}
+.nav-btn .nav-icon{font-size:18px;display:block;margin-bottom:2px}
+.nav-btn.active{color:var(--accent)}
+
+/* ─── Pages ────────────────────────────────────────────────────────── */
+.page{display:none}
+.page.active{display:block}
+
+/* ─── Settings ─────────────────────────────────────────────────────── */
+.settings-card{
+  background:var(--bg2);border:1px solid var(--border);border-radius:12px;
+  padding:14px;margin-bottom:10px;
+}
+.settings-title{font-size:10px;color:var(--muted);font-family:var(--mono);letter-spacing:.5px;margin-bottom:12px}
+.setting-row{display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border)}
+.setting-row:last-child{border-bottom:none}
+.setting-label{font-size:12px;color:var(--text)}
+.setting-hint{font-size:10px;color:var(--muted);font-family:var(--mono)}
+.setting-input{
+  background:var(--bg3);border:1px solid var(--border2);border-radius:4px;
+  color:var(--text);font-family:var(--mono);font-size:12px;
+  padding:4px 8px;width:80px;text-align:right;
+}
+.setting-input:focus{outline:none;border-color:var(--accent)}
+.toggle{
+  width:40px;height:22px;border-radius:11px;background:var(--bg3);
+  border:1px solid var(--border2);cursor:pointer;position:relative;transition:all .2s
+}
+.toggle.on{background:rgba(79,255,176,.2);border-color:rgba(79,255,176,.4)}
+.toggle::after{
+  content:'';position:absolute;top:3px;left:3px;
+  width:14px;height:14px;border-radius:50%;background:var(--muted);transition:all .2s
+}
+.toggle.on::after{left:21px;background:var(--accent)}
+.btn-save{
+  width:100%;padding:11px;font-family:var(--mono);font-size:11px;font-weight:700;
+  letter-spacing:.5px;border-radius:6px;cursor:pointer;border:none;
+  background:rgba(79,255,176,.1);border:1px solid rgba(79,255,176,.3);
+  color:var(--accent);margin-top:8px;transition:all .2s;
+}
+.btn-save:hover{background:rgba(79,255,176,.2)}
+
+/* ─── Pulse animation ──────────────────────────────────────────────── */
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+.pulse{animation:pulse 2s infinite}
+@keyframes fadeIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+.fade-in{animation:fadeIn .25s ease}
+</style>
+</head>
+<body>
+<div class="app">
+
+<!-- Header -->
+<header>
+  <div class="logo">Dinesh<span>Trade</span></div>
+  <div class="header-right">
+    <div class="ws-dot" id="wsDot"></div>
+    <div class="paper-badge" id="modeBadge">PAPER</div>
+  </div>
+</header>
+
+<!-- Instrument tabs -->
+<div class="tabs">
+  <div class="tab active" data-key="NIFTY" onclick="switchInst('NIFTY')">
+    NIFTY<span class="tab-ltp" id="tabLtp_NIFTY">—</span>
+    <span class="tab-dot" id="tabDot_NIFTY"></span>
+  </div>
+  <div class="tab" data-key="BANKNIFTY" onclick="switchInst('BANKNIFTY')">
+    BNIFTY<span class="tab-ltp" id="tabLtp_BANKNIFTY">—</span>
+    <span class="tab-dot" id="tabDot_BANKNIFTY"></span>
+  </div>
+  <div class="tab" data-key="SENSEX" onclick="switchInst('SENSEX')">
+    SENSEX<span class="tab-ltp" id="tabLtp_SENSEX">—</span>
+    <span class="tab-dot" id="tabDot_SENSEX"></span>
+  </div>
+</div>
+
+<!-- Main content -->
+<div class="content">
+
+  <!-- PAGE: Market -->
+  <div class="page active" id="page-market">
+
+    <!-- Price Card -->
+    <div class="price-card" id="priceCard">
+      <div class="inst-name" id="instName">—</div>
+      <div class="price-main" id="priceMain">—</div>
+      <div class="price-change">
+        <div class="change-val" id="priceChange">—</div>
+      </div>
+      <div class="price-meta">
+        <div class="meta-item"><div class="meta-label">OPEN</div><div class="meta-val" id="metaOpen">—</div></div>
+        <div class="meta-item"><div class="meta-label">HIGH</div><div class="meta-val" id="metaHigh">—</div></div>
+        <div class="meta-item"><div class="meta-label">LOW</div><div class="meta-val" id="metaLow">—</div></div>
+        <div class="meta-item"><div class="meta-label">PREV</div><div class="meta-val" id="metaPrev">—</div></div>
+      </div>
+      <div class="ts-line" id="tsLine">Waiting for data…</div>
+    </div>
+
+    <!-- Signal Card -->
+    <div class="signal-card">
+      <div class="signal-header">
+        <div class="signal-title">MARKET SIGNAL</div>
+        <div class="signal-label neutral" id="signalLabel">NEUTRAL</div>
+      </div>
+      <div class="bull-bar-wrap">
+        <div class="bull-bar-fill"></div>
+        <div class="bull-bar-cursor" id="bullCursor" style="left:50%"></div>
+      </div>
+      <div style="display:flex;justify-content:space-between;margin-top:4px">
+        <span style="font-family:var(--mono);font-size:9px;color:var(--muted)">BEAR</span>
+        <span style="font-family:var(--mono);font-size:11px;color:var(--text);font-weight:700" id="bullScore">50 / 100</span>
+        <span style="font-family:var(--mono);font-size:9px;color:var(--muted)">BULL</span>
+      </div>
+      <div class="signal-tags" id="signalTags"></div>
+    </div>
+
+    <!-- Indicators row -->
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:10px">
+      <div class="meta-item" style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:9px">
+        <div class="meta-label">RSI</div><div class="meta-val" id="indRsi">—</div>
+      </div>
+      <div class="meta-item" style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:9px">
+        <div class="meta-label">EMA 9</div><div class="meta-val" id="indEma9">—</div>
+      </div>
+      <div class="meta-item" style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:9px">
+        <div class="meta-label">VWAP</div><div class="meta-val" id="indVwap">—</div>
+      </div>
+    </div>
+
+  </div><!-- /page-market -->
+
+  <!-- PAGE: Bot -->
+  <div class="page" id="page-bot">
+
+    <!-- Bot control -->
+    <div class="bot-card">
+      <div class="bot-header">
+        <div class="bot-title">AUTO BOT</div>
+        <div class="bot-status off" id="botStatusLabel">● STOPPED</div>
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-start" onclick="botStart()">▶ START</button>
+        <button class="btn btn-stop"  onclick="botStop()">■ STOP</button>
+        <button class="btn btn-resume" id="btnResume" style="display:none" onclick="botResume()">↺ RESUME</button>
+      </div>
+      <div id="botPauseMsg" style="display:none;margin-top:10px;font-size:11px;color:var(--yellow);font-family:var(--mono)"></div>
+    </div>
+
+    <!-- Open Trade -->
+    <div class="trade-card">
+      <div class="trade-header">
+        <div class="trade-title">OPEN TRADE</div>
+        <div class="trade-badge" id="tradeBadge" style="display:none"></div>
+      </div>
+      <div id="noTrade" class="no-trade">No open position</div>
+      <div id="tradeDetail" style="display:none">
+        <div class="trade-grid">
+          <div class="trade-item"><div class="trade-lbl">STRIKE</div><div class="trade-val" id="tStrike">—</div></div>
+          <div class="trade-item"><div class="trade-lbl">ENTRY</div><div class="trade-val" id="tEntry">—</div></div>
+          <div class="trade-item"><div class="trade-lbl">CMP</div><div class="trade-val" id="tCmp">—</div></div>
+          <div class="trade-item"><div class="trade-lbl">TARGET</div><div class="trade-val" id="tTarget" style="color:var(--green)">—</div></div>
+          <div class="trade-item"><div class="trade-lbl">SL</div><div class="trade-val" id="tSl" style="color:var(--red)">—</div></div>
+          <div class="trade-item"><div class="trade-lbl">LOTS</div><div class="trade-val" id="tLots">—</div></div>
+        </div>
+        <div class="pnl-bar"><div class="pnl-fill" id="pnlBar" style="width:50%"></div></div>
+        <div style="display:flex;justify-content:space-between;margin-bottom:10px">
+          <span style="font-size:11px;color:var(--muted);font-family:var(--mono)" id="tHeld">—</span>
+          <span style="font-family:var(--mono);font-size:13px;font-weight:700" id="tPnl">₹0</span>
+        </div>
+        <button class="btn-exit" onclick="exitTrade()">EXIT NOW</button>
+      </div>
+    </div>
+
+    <!-- Filter log -->
+    <div class="log-card">
+      <div class="log-title">FILTER LOG — why trades were skipped</div>
+      <div class="log-list" id="filterLogList">
+        <div class="empty-log">No filters yet</div>
+      </div>
+    </div>
+
+  </div><!-- /page-bot -->
+
+  <!-- PAGE: Journal -->
+  <div class="page" id="page-journal">
+    <div class="history-card">
+      <div class="history-title">
+        <span>TRADE HISTORY</span>
+        <span id="tradeCount" style="color:var(--accent);font-family:var(--mono)">0 trades</span>
+      </div>
+      <div class="stats-row">
+        <div class="stat-box"><div class="stat-lbl">TOTAL P&L</div><div class="stat-val" id="statPnl">₹0</div></div>
+        <div class="stat-box"><div class="stat-lbl">WIN RATE</div><div class="stat-val" id="statWr">0%</div></div>
+        <div class="stat-box"><div class="stat-lbl">TRADES</div><div class="stat-val" id="statCount">0</div></div>
+      </div>
+      <div class="history-list" id="historyList">
+        <div class="empty-log">No trades yet</div>
+      </div>
+    </div>
+  </div><!-- /page-journal -->
+
+  <!-- PAGE: Settings -->
+  <div class="page" id="page-settings">
+    <div class="settings-card">
+      <div class="settings-title">RISK SETTINGS</div>
+      <div class="setting-row">
+        <div><div class="setting-label">Stop Loss %</div><div class="setting-hint">% of premium lost to exit</div></div>
+        <input class="setting-input" id="set_slPct" type="number" step="0.01" value="0.85">
+      </div>
+      <div class="setting-row">
+        <div><div class="setting-label">Target %</div><div class="setting-hint">% of premium gained to exit</div></div>
+        <input class="setting-input" id="set_targetPct" type="number" step="0.01" value="1.50">
+      </div>
+      <div class="setting-row">
+        <div><div class="setting-label">Max Hold (min)</div><div class="setting-hint">Force exit after N minutes</div></div>
+        <input class="setting-input" id="set_maxHoldMin" type="number" value="45">
+      </div>
+      <div class="setting-row">
+        <div><div class="setting-label">Cooldown (min)</div><div class="setting-hint">Min wait between trades</div></div>
+        <input class="setting-input" id="set_cooldownMin" type="number" value="15">
+      </div>
+    </div>
+    <div class="settings-card">
+      <div class="settings-title">SIGNAL SETTINGS</div>
+      <div class="setting-row">
+        <div><div class="setting-label">Bull Threshold</div><div class="setting-hint">Score ≥ this → CALL</div></div>
+        <input class="setting-input" id="set_bullMin" type="number" value="57">
+      </div>
+      <div class="setting-row">
+        <div><div class="setting-label">Bear Threshold</div><div class="setting-hint">Score ≤ this → PUT</div></div>
+        <input class="setting-input" id="set_bearMax" type="number" value="43">
+      </div>
+      <div class="setting-row">
+        <div><div class="setting-label">Breakout Buffer %</div><div class="setting-hint">Within X% of prev high/low</div></div>
+        <input class="setting-input" id="set_breakoutBuf" type="number" step="0.01" value="0.10">
+      </div>
+      <div class="setting-row">
+        <div><div class="setting-label">Block 9:15 opening</div><div class="setting-hint">First trade after 9:20</div></div>
+        <!-- read-only display, hardcoded for now -->
+        <div style="font-family:var(--mono);font-size:11px;color:var(--accent)">ON</div>
+      </div>
+    </div>
+    <div class="settings-card">
+      <div class="settings-title">CAPITAL</div>
+      <div class="setting-row">
+        <div><div class="setting-label">Virtual Capital</div><div class="setting-hint">Base for lot sizing</div></div>
+        <input class="setting-input" id="set_capital" type="number" value="100000">
+      </div>
+      <div class="setting-row">
+        <div><div class="setting-label">Paper Mode</div><div class="setting-hint">No real money</div></div>
+        <div class="toggle on" id="togglePaper" onclick="togglePaperMode()"></div>
+      </div>
+    </div>
+    <button class="btn-save" onclick="saveSettings()">SAVE SETTINGS</button>
+  </div><!-- /page-settings -->
+
+</div><!-- /content -->
+
+<!-- Bottom Nav -->
+<nav class="bottom-nav">
+  <button class="nav-btn active" onclick="showPage('market',this)">
+    <span class="nav-icon">📈</span>Market
+  </button>
+  <button class="nav-btn" onclick="showPage('bot',this)">
+    <span class="nav-icon">🤖</span>Bot
+  </button>
+  <button class="nav-btn" onclick="showPage('journal',this)">
+    <span class="nav-icon">📋</span>Journal
+  </button>
+  <button class="nav-btn" onclick="showPage('settings',this)">
+    <span class="nav-icon">⚙️</span>Settings
+  </button>
+</nav>
+
+</div><!-- /app -->
+
+<script>
+// ═══════════════════════════════════════════════════════════════════════════════
+// CLIENT STATE
+// ═══════════════════════════════════════════════════════════════════════════════
+let state = {
+  activeInst: 'NIFTY',
+  prices:     {},
+  openTrade:  null,
+  tradeLog:   [],
+  filterLog:  [],
+  cfg:        {},
+  botOn:      false,
+  botPaused:  false,
+};
+let paperMode = true;
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// SOCKET
+// ═══════════════════════════════════════════════════════════════════════════════
+const socket = io({ transports: ['websocket'] });
+
+socket.on('connect',    () => setWsDot(true));
+socket.on('disconnect', () => setWsDot(false));
+
+socket.on('init', (data) => {
+  state = { ...state, ...data };
+  paperMode = data.cfg?.paperMode ?? true;
+  renderAll();
+});
+
+socket.on('price', (p) => {
+  state.prices[p.key] = p;
+  if (p.key === state.activeInst) renderPrice(p);
+  updateTabLtp(p.key, p.ltp, p.bull, p.stale);
+});
+
+socket.on('priceBg', ({ key, ltp, bull, stale }) => {
+  if (state.prices[key]) state.prices[key].ltp = ltp;
+  updateTabLtp(key, ltp, bull, stale);
+});
+
+socket.on('tradeOpen',  (t) => { state.openTrade = t; renderTrade(); });
+socket.on('tradeUpdate',(t) => { state.openTrade = t; renderTrade(); });
+socket.on('tradeClose', (t) => {
+  state.openTrade = null;
+  state.tradeLog.unshift(t);
+  renderTrade();
+  renderJournal();
+});
+socket.on('filterLog', (e) => {
+  state.filterLog.unshift(e);
+  renderFilterLog();
+});
+socket.on('botStatus', ({ on, paused, reason }) => {
+  state.botOn     = on;
+  state.botPaused = paused;
+  renderBotStatus(reason);
+});
+socket.on('cfg', (c) => { state.cfg = c; paperMode = c.paperMode; applySettings(c); });
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// RENDER — PRICE
+// ═══════════════════════════════════════════════════════════════════════════════
+function renderPrice(p) {
+  const fmt = (n) => n ? Number(n).toLocaleString('en-IN', { minimumFractionDigits:2, maximumFractionDigits:2 }) : '—';
+
+  document.getElementById('instName').innerHTML =
+    (p.key === 'BANKNIFTY' ? 'Bank Nifty' : p.key === 'SENSEX' ? 'Sensex' : 'Nifty 50') +
+    (p.stale ? ' <span class="stale-tag">LAST KNOWN</span>' : '');
+  document.getElementById('priceMain').textContent = fmt(p.ltp);
+  document.getElementById('priceCard').className   = 'price-card' + (p.stale ? ' stale' : '');
+
+  const chg  = parseFloat(p.change) || 0;
+  const pct  = parseFloat(p.changePct) || 0;
+  const chEl = document.getElementById('priceChange');
+  chEl.textContent = `${chg >= 0 ? '+' : ''}${fmt(chg)} (${pct >= 0 ? '+' : ''}${pct}%)`;
+  chEl.className   = 'change-val ' + (chg >= 0 ? 'up' : 'dn');
+
+  document.getElementById('metaOpen').textContent = fmt(p.open);
+  document.getElementById('metaHigh').textContent = fmt(p.high);
+  document.getElementById('metaLow').textContent  = fmt(p.low);
+  document.getElementById('metaPrev').textContent = fmt(p.close);
+  document.getElementById('tsLine').textContent   =
+    (p.stale ? 'Last known' : 'Live') + ' · ' + new Date(p.ts||Date.now()).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata' });
+
+  // Signal
+  const bull = p.bull || 50;
+  document.getElementById('bullCursor').style.left = bull + '%';
+  document.getElementById('bullScore').textContent = `${bull} / 100`;
+  const lbl = document.getElementById('signalLabel');
+  lbl.textContent = p.prediction || 'NEUTRAL';
+  lbl.className   = 'signal-label ' + (bull >= 57 ? 'bull' : bull <= 43 ? 'bear' : 'neutral');
+
+  // Tags
+  const tags = [];
+  if (p.rsi)      tags.push({ label: `RSI ${p.rsi}`, active: p.rsi > 55 || p.rsi < 45 });
+  if (p.aboveEMA9 !== undefined) tags.push({ label: `EMA9 ${p.aboveEMA9 ? 'ABOVE' : 'BELOW'}`, active: p.aboveEMA9 });
+  if (p.aboveVWAP !== null && p.aboveVWAP !== undefined) tags.push({ label: `VWAP ${p.aboveVWAP ? 'ABOVE' : 'BELOW'}`, active: p.aboveVWAP });
+  if (p.hh) tags.push({ label: 'HH', active: true });
+  if (p.ll) tags.push({ label: 'LL', active: false, danger: true });
+  if (p.bullCandle !== undefined) tags.push({ label: p.bullCandle ? 'BULL CANDLE' : 'BEAR CANDLE', active: p.bullCandle });
+
+  document.getElementById('signalTags').innerHTML = tags.map(t =>
+    `<span class="tag ${t.active ? 'active' : ''} ${t.danger ? 'danger' : ''}">${t.label}</span>`
+  ).join('');
+
+  // Indicators
+  document.getElementById('indRsi').textContent  = p.rsi || '—';
+  document.getElementById('indEma9').textContent = p.ema9 ? Number(p.ema9).toLocaleString('en-IN') : '—';
+  document.getElementById('indVwap').textContent = p.vwap ? Number(p.vwap).toLocaleString('en-IN') : '—';
+  const rsiEl = document.getElementById('indRsi');
+  rsiEl.style.color = p.rsi > 60 ? 'var(--green)' : p.rsi < 40 ? 'var(--red)' : 'var(--text)';
+}
+
+function updateTabLtp(key, ltp, bull, stale) {
+  const el = document.getElementById(`tabLtp_${key}`);
+  const dot = document.getElementById(`tabDot_${key}`);
+  if (el && ltp) el.textContent = Number(ltp).toLocaleString('en-IN', { maximumFractionDigits: 0 });
+  if (dot) dot.className = 'tab-dot ' + (bull >= 57 ? 'bull' : bull <= 43 ? 'bear' : '');
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// RENDER — TRADE
+// ═══════════════════════════════════════════════════════════════════════════════
+function renderTrade() {
+  const t = state.openTrade;
+  document.getElementById('noTrade').style.display    = t ? 'none' : 'block';
+  document.getElementById('tradeDetail').style.display = t ? 'block' : 'none';
+  if (!t) { document.getElementById('tradeBadge').style.display = 'none'; return; }
+
+  const badge = document.getElementById('tradeBadge');
+  badge.style.display = 'block';
+  badge.textContent   = `${t.key} ${t.dir}`;
+  badge.className     = `trade-badge ${t.dir === 'CALL' ? 'call' : 'put'}`;
+
+  document.getElementById('tStrike').textContent = `₹${t.strike}`;
+  document.getElementById('tEntry').textContent  = `₹${t.entry}`;
+  document.getElementById('tCmp').textContent    = `₹${t.currentPrem || t.entry}`;
+  document.getElementById('tTarget').textContent = `₹${t.target}`;
+  document.getElementById('tSl').textContent     = `₹${t.sl}`;
+  document.getElementById('tLots').textContent   = t.lots;
+
+  const pnl    = t.pnl || 0;
+  const pnlEl  = document.getElementById('tPnl');
+  pnlEl.textContent = `${pnl >= 0 ? '+' : ''}₹${Math.round(pnl).toLocaleString('en-IN')}`;
+  pnlEl.style.color = pnl >= 0 ? 'var(--green)' : 'var(--red)';
+
+  // PnL bar: 0% = at SL, 50% = at entry, 100% = at target
+  const range    = (t.target - t.sl) || 1;
+  const pnlPct   = Math.max(0, Math.min(100, ((t.currentPrem||t.entry) - t.sl) / range * 100));
+  const bar      = document.getElementById('pnlBar');
+  bar.style.width      = pnlPct + '%';
+  bar.style.background = pnlPct > 60 ? 'var(--green)' : pnlPct < 30 ? 'var(--red)' : 'var(--yellow)';
+
+  const heldMin = t.entryTs ? Math.round((Date.now() - t.entryTs) / 60000) : 0;
+  document.getElementById('tHeld').textContent = `${heldMin}m held`;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// RENDER — JOURNAL
+// ═══════════════════════════════════════════════════════════════════════════════
+function renderJournal() {
+  const trades = state.tradeLog || [];
+  document.getElementById('tradeCount').textContent = `${trades.length} trades`;
+  document.getElementById('statCount').textContent  = trades.length;
+
+  const totalPnl = trades.reduce((s, t) => s + (t.finalPnl || 0), 0);
+  const wins     = trades.filter(t => t.finalPnl > 0).length;
+  const wr       = trades.length > 0 ? Math.round(wins / trades.length * 100) : 0;
+
+  const pnlEl = document.getElementById('statPnl');
+  pnlEl.textContent = `${totalPnl >= 0 ? '+' : ''}₹${Math.round(totalPnl).toLocaleString('en-IN')}`;
+  pnlEl.className   = `stat-val ${totalPnl >= 0 ? 'pos' : 'neg'}`;
+  document.getElementById('statWr').textContent = `${wr}%`;
+  document.getElementById('statWr').className   = `stat-val ${wr >= 50 ? 'pos' : 'neg'}`;
+
+  const list = document.getElementById('historyList');
+  if (trades.length === 0) { list.innerHTML = '<div class="empty-log">No trades yet</div>'; return; }
+  list.innerHTML = trades.slice(0, 50).map(t => {
+    const pnl = t.finalPnl || 0;
+    const dt  = t.exitTs ? new Date(t.exitTs).toLocaleString('en-IN', { timeZone:'Asia/Kolkata', day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit' }) : '—';
+    return `<div class="h-row fade-in">
+      <div class="h-left">
+        <div class="h-key ${t.dir === 'CALL' ? 'call' : 'put'}">${t.key} ${t.dir} ${t.strike}</div>
+        <div class="h-detail">${dt} · ${t.exitReason||''} · ${t.lots} lot</div>
+      </div>
+      <div class="h-pnl ${pnl >= 0 ? 'pos' : 'neg'}">${pnl >= 0 ? '+' : ''}₹${Math.round(pnl).toLocaleString('en-IN')}</div>
+    </div>`;
+  }).join('');
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// RENDER — FILTER LOG
+// ═══════════════════════════════════════════════════════════════════════════════
+function renderFilterLog() {
+  const list = document.getElementById('filterLogList');
+  const logs = state.filterLog || [];
+  if (logs.length === 0) { list.innerHTML = '<div class="empty-log">No filters yet</div>'; return; }
+  list.innerHTML = logs.slice(0, 30).map(e =>
+    `<div class="log-row">
+      <span class="log-time">${e.time}</span>
+      <span class="log-key">${e.key} ${e.dir}</span>
+      <span class="log-reason">${e.reason}</span>
+    </div>`
+  ).join('');
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// RENDER — BOT STATUS
+// ═══════════════════════════════════════════════════════════════════════════════
+function renderBotStatus(reason) {
+  const lbl    = document.getElementById('botStatusLabel');
+  const resume = document.getElementById('btnResume');
+  const msg    = document.getElementById('botPauseMsg');
+  if (state.botPaused) {
+    lbl.textContent = '⚠ PAUSED'; lbl.className = 'bot-status paused';
+    resume.style.display = 'block';
+    msg.style.display = 'block'; msg.textContent = reason || 'Bot paused';
+  } else if (state.botOn) {
+    lbl.textContent = '● RUNNING'; lbl.className = 'bot-status on';
+    resume.style.display = 'none'; msg.style.display = 'none';
+  } else {
+    lbl.textContent = '● STOPPED'; lbl.className = 'bot-status off';
+    resume.style.display = 'none'; msg.style.display = 'none';
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// RENDER ALL
+// ═══════════════════════════════════════════════════════════════════════════════
+function renderAll() {
+  const p = state.prices[state.activeInst];
+  if (p) renderPrice(p);
+  for (const [key, price] of Object.entries(state.prices)) {
+    updateTabLtp(key, price.ltp, price.bull, price.stale);
+  }
+  renderTrade();
+  renderJournal();
+  renderFilterLog();
+  renderBotStatus();
+  applySettings(state.cfg);
+  document.getElementById('modeBadge').textContent = state.cfg?.paperMode ? 'PAPER' : 'LIVE';
+  document.getElementById('modeBadge').className   = state.cfg?.paperMode ? 'paper-badge' : 'live-badge';
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ACTIONS
+// ═══════════════════════════════════════════════════════════════════════════════
+function switchInst(key) {
+  state.activeInst = key;
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.key === key));
+  fetch('/api/instrument', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ key }) });
+  const p = state.prices[key];
+  if (p) renderPrice(p);
+}
+
+function botStart()  { fetch('/api/bot/start',  { method:'POST' }); }
+function botStop()   { fetch('/api/bot/stop',   { method:'POST' }); }
+function botResume() { fetch('/api/bot/resume', { method:'POST' }); }
+function exitTrade() { fetch('/api/trade/exit', { method:'POST' }); }
+
+function showPage(name, btn) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById(`page-${name}`).classList.add('active');
+  btn.classList.add('active');
+}
+
+function setWsDot(alive) {
+  document.getElementById('wsDot').className = 'ws-dot' + (alive ? ' live' : '');
+}
+
+// ─── Settings ─────────────────────────────────────────────────────────────────
+function applySettings(c) {
+  if (!c) return;
+  const map = { slPct:'set_slPct', targetPct:'set_targetPct', maxHoldMin:'set_maxHoldMin',
+                cooldownMin:'set_cooldownMin', bullMin:'set_bullMin', bearMax:'set_bearMax',
+                breakoutBuf:'set_breakoutBuf', capital:'set_capital' };
+  for (const [k, id] of Object.entries(map)) {
+    const el = document.getElementById(id);
+    if (el && c[k] !== undefined) el.value = c[k];
+  }
+  paperMode = c.paperMode ?? true;
+  document.getElementById('togglePaper').className = 'toggle' + (paperMode ? ' on' : '');
+}
+
+function togglePaperMode() {
+  paperMode = !paperMode;
+  document.getElementById('togglePaper').className = 'toggle' + (paperMode ? ' on' : '');
+}
+
+function saveSettings() {
+  const body = {
+    slPct:       parseFloat(document.getElementById('set_slPct').value),
+    targetPct:   parseFloat(document.getElementById('set_targetPct').value),
+    maxHoldMin:  parseFloat(document.getElementById('set_maxHoldMin').value),
+    cooldownMin: parseFloat(document.getElementById('set_cooldownMin').value),
+    bullMin:     parseFloat(document.getElementById('set_bullMin').value),
+    bearMax:     parseFloat(document.getElementById('set_bearMax').value),
+    breakoutBuf: parseFloat(document.getElementById('set_breakoutBuf').value),
+    capital:     parseFloat(document.getElementById('set_capital').value),
+    paperMode,
+  };
+  fetch('/api/tune', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) })
+    .then(() => { document.getElementById('modeBadge').textContent = paperMode ? 'PAPER' : 'LIVE';
+                  document.getElementById('modeBadge').className   = paperMode ? 'paper-badge' : 'live-badge'; });
+}
+</script>
+</body>
+</html>
