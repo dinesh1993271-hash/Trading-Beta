@@ -25,11 +25,15 @@ app.use(express.static(path.join(__dirname)));
 // SECTION 0 — ENV VALIDATION
 // ═══════════════════════════════════════════════════════════════════════════════
 const requiredEnv = ['ANGEL_API_KEY', 'ANGEL_CLIENT_ID', 'ANGEL_PASSWORD', 'ANGEL_TOTP_SECRET'];
+let demoMode = false;
 for (const env of requiredEnv) {
   if (!process.env[env]) {
-    console.error(`❌ Missing env var: ${env}`);
-    process.exit(1);
+    console.warn(`⚠️ Missing env var: ${env}`);
+    demoMode = true;
   }
+}
+if (demoMode) {
+  console.log('🎮 DEMO MODE — Using simulated market data');
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -136,6 +140,13 @@ function angelHeaders() {
 }
 
 async function login() {
+  if (demoMode) {
+    authToken = 'demo-token';
+    feedToken = 'demo-feed';
+    tokenExp  = Date.now() + 24 * 60 * 60 * 1000;
+    console.log('🎮 Demo login OK');
+    return true;
+  }
   try {
     const res = await axios.post(
       'https://apiconnect.angelone.in/rest/auth/angelbroking/user/v1/loginByPassword',
@@ -216,7 +227,41 @@ function generateTOTP(secret) {
 // ═══════════════════════════════════════════════════════════════════════════════
 // SECTION 6 — BATCH PRICE FETCH
 // ═══════════════════════════════════════════════════════════════════════════════
+
+// Demo price generators
+const demoBasePrices = { NIFTY: 22500, BANKNIFTY: 48000, SENSEX: 74000 };
+const demoPrevClose = { ...demoBasePrices };
+
+function generateDemoPrice(key) {
+  const base = demoBasePrices[key];
+  const drift = (Math.random() - 0.5) * base * 0.002; // ±0.1% drift
+  const ltp = base + drift;
+  demoBasePrices[key] = ltp; // Random walk
+  const open = demoPrevClose[key] * (1 + (Math.random() - 0.5) * 0.005);
+  const high = Math.max(open, ltp) * (1 + Math.random() * 0.003);
+  const low = Math.min(open, ltp) * (1 - Math.random() * 0.003);
+  const close = demoPrevClose[key];
+  const vol = Math.floor(Math.random() * 1000000) + 500000;
+  return { ltp, open, high, low, close, vol };
+}
+
 async function batchFetch() {
+  if (demoMode) {
+    for (const key of Object.keys(INSTRUMENTS)) {
+      const demo = generateDemoPrice(key);
+      processQuote(key, {
+        symbolToken: INSTRUMENTS[key].token,
+        ltp: demo.ltp,
+        open: demo.open,
+        high: demo.high,
+        low: demo.low,
+        close: demo.close,
+        volume: demo.vol,
+        tradeVolume: demo.vol,
+      });
+    }
+    return true;
+  }
   const authed = await ensureAuth();
   if (!authed) return false;
 
@@ -393,6 +438,28 @@ function calcSignals(key, ltp, open, high, low, close, vol) {
 // SECTION 9 — OPTION CHAIN (FIXED)
 // ═══════════════════════════════════════════════════════════════════════════════
 async function fetchOptionChain(key) {
+  if (demoMode) {
+    const ltp = priceCache[key]?.ltp || demoBasePrices[key];
+    const gap = INSTRUMENTS[key].strikeGap;
+    const atm = Math.round(ltp / gap) * gap;
+    const chain = [];
+    for (let i = -5; i <= 5; i++) {
+      const strike = atm + i * gap;
+      const moneyness = (ltp - strike) / strike;
+      const callPrem = Math.max(1, Math.round(ltp * 0.005 * (1 - moneyness * 5)));
+      const putPrem = Math.max(1, Math.round(ltp * 0.005 * (1 + moneyness * 5)));
+      chain.push({
+        strike, callOI: Math.floor(Math.random()*50000), putOI: Math.floor(Math.random()*50000),
+        callPrem, putPrem, callToken: `demo-${key}-CE-${strike}`, putToken: `demo-${key}-PE-${strike}`,
+      });
+    }
+    const totalCallOI = chain.reduce((s, c) => s + c.callOI, 0);
+    const totalPutOI = chain.reduce((s, c) => s + c.putOI, 0);
+    const pcr = totalCallOI > 0 ? parseFloat((totalPutOI / totalCallOI).toFixed(2)) : 1;
+    oiCache[key] = { pcr, maxPain: atm, chain, ts: Date.now() };
+    io.emit('oiUpdate', { key, pcr, maxPain: atm, chain: chain.slice(0, 20) });
+    return;
+  }
   const authed = await ensureAuth();
   if (!authed) return;
 
@@ -681,7 +748,18 @@ async function placeTrade(key, quote, dir, bull) {
   };
 
   console.log(`✅ [TRADE] ${key} ${dir} ${strike} @ ₹${entry} | SL ₹${sl} | Target ₹${target} | ${lots} lot(s) | ${cfg.paperMode ? 'PAPER' : 'LIVE'}`);
-  io.emit('tradeOpen', openTrade);
+
+  // Get AI analysis asynchronously (don't block trade)
+  getAIAnalysis(key, quote, dir, strike, entry, lots).then(aiReason => {
+    if (aiReason) {
+      openTrade.aiReason = aiReason;
+      io.emit('tradeOpen', { ...openTrade, aiReason });
+    } else {
+      io.emit('tradeOpen', openTrade);
+    }
+  }).catch(() => {
+    io.emit('tradeOpen', openTrade);
+  });
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -776,6 +854,50 @@ async function closeTrade(reason, exitPrem) {
   console.log(`🏁 [EXIT] ${trade.key} ${trade.dir} — ${reason} @ ₹${exitPrem} | PnL: ₹${trade.finalPnl.toFixed(0)}`);
   io.emit('tradeClose', trade);
   openTrade = null;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// SECTION 11d — AI ANALYSIS (GROQ)
+// ═══════════════════════════════════════════════════════════════════════════════
+async function getAIAnalysis(key, quote, dir, strike, entry, lots) {
+  const groqKey = process.env.GROQ_API_KEY;
+  if (!groqKey) return null;
+
+  const inst = INSTRUMENTS[key];
+  const prompt = `You are an expert Indian options trader. Analyze this trade setup:
+
+Instrument: ${inst.name} (${key})
+Direction: ${dir}
+Strike: ₹${strike}
+Entry Premium: ₹${entry}
+Lots: ${lots}
+Lot Size: ${inst.lotSize}
+Spot: ₹${quote.ltp}
+Change: ${quote.change} (${quote.changePct}%)
+RSI: ${quote.rsi}
+EMA9: ₹${quote.ema9}
+VWAP: ₹${quote.vwap}
+Bull Score: ${quote.bull}/100
+Prediction: ${quote.prediction}
+
+Provide a 2-3 sentence trade rationale and one risk warning. Be concise.`;
+
+  try {
+    const res = await axios.post(
+      'https://api.groq.com/openai/v1/chat/completions',
+      {
+        model: 'llama-3.1-8b-instant',
+        messages: [{ role: 'user', content: prompt }],
+        max_tokens: 200,
+        temperature: 0.3,
+      },
+      { headers: { 'Authorization': `Bearer ${groqKey}`, 'Content-Type': 'application/json' }, timeout: 10000 }
+    );
+    return res.data?.choices?.[0]?.message?.content || null;
+  } catch (e) {
+    console.error('[AI] Groq error:', e.message);
+    return null;
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -911,6 +1033,7 @@ io.on('connection', (socket) => {
     cfg,
     botOn, botPaused, consecLosses,
     activeInst, wsAlive,
+    aiEnabled: !!process.env.GROQ_API_KEY,
     instruments: Object.entries(INSTRUMENTS).map(([k,v]) => ({ key: k, name: v.name })),
   });
 
