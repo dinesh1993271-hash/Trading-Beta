@@ -140,6 +140,11 @@ let filterLog   = [];
 let consecLosses = 0;
 const MAX_CONSEC = 3;
 
+// Paper trading daily tracking
+let paperDailyPnl = 0;
+let paperDailyTrades = 0;
+let paperLastResetDate = null;
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // SECTION 4 — ANGEL ONE AUTH
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -742,33 +747,99 @@ async function placeTrade(key, quote, dir, bull) {
   }
   if (!entry || entry < 1) return;
 
+  // ═══════════════════════════════════════════════════════════════════════════════
+  // REALISTIC PAPER: Simulate live execution flaws
+  // ═══════════════════════════════════════════════════════════════════════════════
+  let executionNote = '';
+  let filledLots = null;
+
+  // 1. Simulate order rejection (2% chance)
+  if (cfg.paperMode && Math.random() < cfg.paperOrderReject) {
+    logFilter(key, dir, bull, `Order REJECTED by broker (simulated live rejection)`);
+    console.log(`🚫 [REJECTED] ${key} ${dir} — simulated broker rejection`);
+    return;
+  }
+
+  // 2. Simulate slippage (entry worse than expected)
+  let slippedEntry = entry;
+  if (cfg.paperMode) {
+    const slipPct = cfg.paperSlippagePct / 100;
+    // OTM has more slippage
+    const isOTM = (dir === 'CALL' && strike > atm) || (dir === 'PUT' && strike < atm);
+    const extraSlip = isOTM ? (cfg.paperSpreadOTM / 100) : 0;
+    const totalSlip = slipPct + extraSlip;
+    slippedEntry = Math.round(entry * (1 + totalSlip));
+    if (slippedEntry > entry) {
+      executionNote += `Slippage: ₹${entry} → ₹${slippedEntry} (+${(totalSlip*100).toFixed(1)}%). `;
+    }
+  }
+
+  // 3. Simulate partial fill (5% chance)
+  if (cfg.paperMode && Math.random() < cfg.paperPartialFill) {
+    filledLots = Math.max(1, Math.floor(lots * 0.5)); // 50% fill
+    executionNote += `Partial fill: ${filledLots}/${lots} lots. `;
+  }
+
+  // 4. Margin check (even in paper)
+  if (cfg.paperMode && cfg.paperMarginRequired) {
+    const marginRequired = slippedEntry * (filledLots || lots) * inst.lotSize * 1.2; // 20% buffer
+    if (marginRequired > cfg.capital) {
+      logFilter(key, dir, bull, `Margin insufficient: need ₹${Math.round(marginRequired)}, have ₹${cfg.capital}`);
+      console.log(`🚫 [MARGIN] ${key} ${dir} — need ₹${Math.round(marginRequired)}, have ₹${cfg.capital}`);
+      return;
+    }
+  }
+
+  // 5. Daily loss kill switch
+  if (cfg.paperMode && cfg.paperMaxDailyLoss > 0) {
+    // Reset daily tracking if new day
+    const today = new Date().toDateString();
+    if (paperLastResetDate !== today) {
+      paperDailyPnl = 0;
+      paperDailyTrades = 0;
+      paperLastResetDate = today;
+    }
+    if (paperDailyPnl <= -cfg.paperMaxDailyLoss) {
+      logFilter(key, dir, bull, `Daily loss limit hit: ₹${paperDailyPnl} (limit: -₹${cfg.paperMaxDailyLoss})`);
+      console.log(`🚫 [DAILY LIMIT] Paper loss ₹${paperDailyPnl} — stopping for today`);
+      botPaused = true;
+      io.emit('botStatus', { on: botOn, paused: true, reason: `Daily loss limit: ₹${paperDailyPnl}` });
+      return;
+    }
+  }
+
   const confidence = bull >= 70 || bull <= 30 ? 'HIGH' : bull >= 63 || bull <= 37 ? 'MED' : 'BASE';
   const pct = confidence === 'HIGH' ? cfg.highPct : confidence === 'MED' ? cfg.medPct : cfg.basePct;
   const capital = cfg.capital * pct;
-  const lotCost = entry * inst.lotSize;
+  const lotCost = slippedEntry * inst.lotSize;
   const lots = Math.max(1, Math.floor(capital / lotCost));
 
-  const sl = Math.round(entry * cfg.slPct);
-  const target = Math.round(entry * cfg.targetPct);
+  const sl = Math.round(slippedEntry * cfg.slPct);
+  const target = Math.round(slippedEntry * cfg.targetPct);
 
   openTrade = {
     id: Date.now(),
     key, dir, strike,
-    entry, sl, target, lots,
+    entry: slippedEntry,
+    originalEntry: entry, // Track original for slippage analysis
+    sl, target, lots,
+    filledLots: filledLots || lots,
     entrySpot: quote.ltp,
     entryTs: Date.now(),
     expiry: getNearestExpiry(key),
     confidence,
     paperMode: cfg.paperMode,
-    currentPrem: entry,
+    currentPrem: slippedEntry,
     pnl: 0,
     optionToken,
+    executionNote,
+    paperCosts: 0, // Will track brokerage + STT + GST
   };
 
-  console.log(`✅ [TRADE] ${key} ${dir} ${strike} @ ₹${entry} | SL ₹${sl} | Target ₹${target} | ${lots} lot(s) | ${cfg.paperMode ? 'PAPER' : 'LIVE'}`);
+  console.log(`✅ [TRADE] ${key} ${dir} ${strike} @ ₹${slippedEntry} (was ₹${entry}) | SL ₹${sl} | Target ₹${target} | ${lots} lot(s) | ${cfg.paperMode ? 'PAPER' : 'LIVE'}${executionNote ? ' | ' + executionNote : ''}`);
 
   // Get AI analysis asynchronously (don't block trade)
-  getAIAnalysis(key, quote, dir, strike, entry, lots).then(aiReason => {
+  getAIAnalysis(key, quote, dir, strike, slippedEntry, lots).then(aiReason => {
     if (aiReason) {
       openTrade.aiReason = aiReason;
       io.emit('tradeOpen', { ...openTrade, aiReason });
@@ -785,7 +856,7 @@ async function placeTrade(key, quote, dir, bull) {
 // ═══════════════════════════════════════════════════════════════════════════════
 async function manageTrade() {
   if (!openTrade) return;
-  const { key, dir, strike, entry, sl, target, entryTs, lots, optionToken } = openTrade;
+  const { key, dir, strike, entry, sl, target, entryTs, lots, optionToken, filledLots, paperMode } = openTrade;
   const quote = priceCache[key];
   if (!quote || quote.stale) return;
 
@@ -823,20 +894,45 @@ async function manageTrade() {
     prem = estimatePremium(key, dir, strike, openTrade.entrySpot, quote.ltp, entry);
   }
 
-  openTrade.currentPrem = prem;
-  openTrade.pnl = (prem - entry) * lots * INSTRUMENTS[key].lotSize;
+  // ═══════════════════════════════════════════════════════════════════════════════
+  // REALISTIC PAPER: Simulate exit slippage and costs
+  // ═══════════════════════════════════════════════════════════════════════════════
+  let exitSlippageNote = '';
+  let exitPrem = prem;
+
+  if (paperMode && cfg.paperMode) {
+    // Exit slippage: you get worse price when selling (especially OTM)
+    const isOTM = (dir === 'CALL' && strike > Math.round(quote.ltp / INSTRUMENTS[key].strikeGap) * INSTRUMENTS[key].strikeGap) ||
+                  (dir === 'PUT' && strike < Math.round(quote.ltp / INSTRUMENTS[key].strikeGap) * INSTRUMENTS[key].strikeGap);
+    const exitSlip = isOTM ? (cfg.paperSpreadOTM / 100) : (cfg.paperSlippagePct / 100);
+    exitPrem = Math.max(1, Math.round(prem * (1 - exitSlip))); // Sell at lower price
+    if (exitPrem < prem) {
+      exitSlippageNote = `Exit slip: ₹${prem} → ₹${exitPrem} (-${(exitSlip*100).toFixed(1)}%). `;
+    }
+
+    // Simulate liquidity delay (10% chance: price moves 1 extra tick against you)
+    if (Math.random() < cfg.paperLiquidityDelay) {
+      const tickSize = 0.05;
+      exitPrem = Math.max(1, Math.round((exitPrem - tickSize) * 100) / 100);
+      exitSlippageNote += 'Liquidity delay. ';
+    }
+  }
+
+  const actualLots = filledLots || lots;
+  openTrade.currentPrem = exitPrem;
+  openTrade.pnl = (exitPrem - entry) * actualLots * INSTRUMENTS[key].lotSize;
 
   const heldMin = (Date.now() - entryTs) / 60000;
   const heldOk = heldMin >= cfg.minHoldMin;
 
   let exitReason = null;
-  if (heldOk && prem <= sl)     exitReason = 'SL_HIT';
-  if (heldOk && prem >= target) exitReason = 'TARGET_HIT';
+  if (heldOk && exitPrem <= sl)     exitReason = 'SL_HIT';
+  if (heldOk && exitPrem >= target) exitReason = 'TARGET_HIT';
   if (heldMin >= cfg.maxHoldMin) exitReason = 'TIME_EXIT';
 
-  io.emit('tradeUpdate', { ...openTrade, heldMin: Math.round(heldMin) });
+  io.emit('tradeUpdate', { ...openTrade, heldMin: Math.round(heldMin), exitSlippageNote });
 
-  if (exitReason) await closeTrade(exitReason, prem);
+  if (exitReason) await closeTrade(exitReason, exitPrem);
 }
 
 function estimatePremium(key, dir, strike, entrySpot, currentSpot, entryPrem) {
@@ -859,8 +955,38 @@ async function closeTrade(reason, exitPrem) {
     exitPrem,
     exitTs: Date.now(),
     exitReason: reason,
-    finalPnl: (exitPrem - openTrade.entry) * openTrade.lots * INSTRUMENTS[openTrade.key].lotSize,
   };
+
+  // ═══════════════════════════════════════════════════════════════════════════════
+  // REALISTIC PAPER: Deduct brokerage, STT, GST like live
+  // ═══════════════════════════════════════════════════════════════════════════════
+  const actualLots = trade.filledLots || trade.lots;
+  const grossPnl = (exitPrem - trade.entry) * actualLots * INSTRUMENTS[trade.key].lotSize;
+
+  if (trade.paperMode && cfg.paperMode) {
+    // Brokerage: ₹20 per order (entry + exit = 2 orders)
+    const brokerage = cfg.paperBrokerage * 2;
+    // STT: 0.05% on sell side (exit only)
+    const stt = (exitPrem * actualLots * INSTRUMENTS[trade.key].lotSize) * (cfg.paperSttPct / 100);
+    // GST: 18% on brokerage
+    const gst = brokerage * (cfg.paperGstPct / 100);
+    // Total costs
+    const totalCosts = brokerage + stt + gst;
+
+    trade.paperCosts = totalCosts;
+    trade.grossPnl = grossPnl;
+    trade.finalPnl = grossPnl - totalCosts;
+
+    // Update daily tracking
+    paperDailyPnl += trade.finalPnl;
+    paperDailyTrades++;
+
+    trade.paperDailyPnl = paperDailyPnl;
+    trade.paperDailyTrades = paperDailyTrades;
+  } else {
+    trade.finalPnl = grossPnl;
+  }
+
   const won = trade.finalPnl > 0;
 
   if (won) consecLosses = 0;
@@ -869,7 +995,8 @@ async function closeTrade(reason, exitPrem) {
   tradeLog.unshift(trade);
   if (tradeLog.length > 500) tradeLog.pop();
 
-  console.log(`🏁 [EXIT] ${trade.key} ${trade.dir} — ${reason} @ ₹${exitPrem} | PnL: ₹${trade.finalPnl.toFixed(0)}`);
+  const costNote = trade.paperCosts ? ` | Costs: ₹${trade.paperCosts.toFixed(0)} (Brokerage ₹${cfg.paperBrokerage*2} + STT ₹${(trade.paperCosts-cfg.paperBrokerage*2-(cfg.paperBrokerage*2*cfg.paperGstPct/100)).toFixed(0)} + GST ₹${(cfg.paperBrokerage*2*cfg.paperGstPct/100).toFixed(0)})` : '';
+  console.log(`🏁 [EXIT] ${trade.key} ${trade.dir} — ${reason} @ ₹${exitPrem} | Gross: ₹${trade.grossPnl?.toFixed(0) || grossPnl.toFixed(0)} | Net: ₹${trade.finalPnl.toFixed(0)}${costNote}${trade.executionNote ? ' | ' + trade.executionNote : ''}${trade.exitSlippageNote ? ' | ' + trade.exitSlippageNote : ''}`);
   io.emit('tradeClose', trade);
   openTrade = null;
 }
@@ -1010,6 +1137,14 @@ app.get('/api/state', (req, res) => {
     botOn, botPaused, consecLosses,
     activeInst,
     wsAlive,
+    paperStats: cfg.paperMode ? {
+      dailyPnl: paperDailyPnl,
+      dailyTrades: paperDailyTrades,
+      lastResetDate: paperLastResetDate,
+      maxDailyLoss: cfg.paperMaxDailyLoss,
+      slippageEnabled: cfg.paperSlippagePct > 0,
+      marginEnabled: cfg.paperMarginRequired,
+    } : null,
   });
 });
 
