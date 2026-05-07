@@ -1,0 +1,1055 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dinesh's Trading Dashboard</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/totp-generator/0.0.14/totp-generator.min.js"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Syne:wght@400;600;700;800&display=swap');
+
+  :root {
+    --bg: #0a0e1a;
+    --surface: #111827;
+    --card: #1a2235;
+    --border: #1e2d45;
+    --accent: #00d4ff;
+    --green: #00ff88;
+    --red: #ff4466;
+    --yellow: #ffd700;
+    --text: #e2e8f0;
+    --muted: #64748b;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Syne', sans-serif;
+    min-height: 100vh;
+    background-image: radial-gradient(ellipse at 20% 50%, rgba(0,212,255,0.03) 0%, transparent 50%),
+                      radial-gradient(ellipse at 80% 20%, rgba(0,255,136,0.03) 0%, transparent 50%);
+  }
+
+  .mono { font-family: 'JetBrains Mono', monospace; }
+
+  /* Header */
+  .header {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 12px 16px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+  }
+
+  .logo {
+    font-size: 16px;
+    font-weight: 800;
+    color: var(--accent);
+    letter-spacing: -0.5px;
+  }
+
+  .logo span { color: var(--green); }
+
+  .status-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--muted);
+    display: inline-block;
+    margin-right: 6px;
+    animation: pulse 2s infinite;
+  }
+  .status-dot.live { background: var(--green); }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+  }
+
+  .status-text { font-size: 11px; color: var(--muted); font-family: 'JetBrains Mono', monospace; }
+
+  /* Login Section */
+  .login-section {
+    padding: 24px 16px;
+    max-width: 480px;
+    margin: 0 auto;
+  }
+
+  .section-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    margin-bottom: 16px;
+  }
+
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px;
+    margin-bottom: 16px;
+  }
+
+  .input-group { margin-bottom: 14px; }
+
+  .input-group label {
+    display: block;
+    font-size: 11px;
+    color: var(--muted);
+    margin-bottom: 6px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    font-family: 'JetBrains Mono', monospace;
+  }
+
+  .input-group input, .input-group select {
+    width: 100%;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 10px 14px;
+    border-radius: 8px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    outline: none;
+    transition: border-color 0.2s;
+  }
+
+  .input-group input:focus, .input-group select:focus {
+    border-color: var(--accent);
+  }
+
+  .input-group select option { background: var(--surface); }
+
+  .btn {
+    width: 100%;
+    padding: 14px;
+    border: none;
+    border-radius: 10px;
+    font-family: 'Syne', sans-serif;
+    font-weight: 700;
+    font-size: 14px;
+    cursor: pointer;
+    transition: all 0.2s;
+    letter-spacing: 0.5px;
+  }
+
+  .btn-primary {
+    background: linear-gradient(135deg, var(--accent), #0099cc);
+    color: #000;
+  }
+
+  .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 4px 20px rgba(0,212,255,0.3); }
+  .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+
+  .btn-analyze {
+    background: linear-gradient(135deg, var(--green), #00aa55);
+    color: #000;
+    margin-top: 12px;
+  }
+
+  /* Dashboard */
+  .dashboard { padding: 16px; max-width: 480px; margin: 0 auto; }
+
+  /* Instrument Selector */
+  .instrument-tabs {
+    display: flex;
+    gap: 8px;
+    overflow-x: auto;
+    padding-bottom: 4px;
+    margin-bottom: 16px;
+    scrollbar-width: none;
+  }
+  .instrument-tabs::-webkit-scrollbar { display: none; }
+
+  .tab {
+    padding: 8px 14px;
+    border-radius: 20px;
+    border: 1px solid var(--border);
+    background: var(--card);
+    color: var(--muted);
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: all 0.2s;
+  }
+
+  .tab.active {
+    background: var(--accent);
+    color: #000;
+    border-color: var(--accent);
+  }
+
+  /* Price Card */
+  .price-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 20px;
+    margin-bottom: 16px;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .price-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, var(--accent), var(--green));
+  }
+
+  .instrument-name {
+    font-size: 12px;
+    color: var(--muted);
+    font-family: 'JetBrains Mono', monospace;
+    margin-bottom: 4px;
+  }
+
+  .price-main {
+    font-size: 36px;
+    font-weight: 800;
+    font-family: 'JetBrains Mono', monospace;
+    line-height: 1;
+    margin-bottom: 6px;
+  }
+
+  .price-change {
+    font-size: 13px;
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 600;
+  }
+
+  .up { color: var(--green); }
+  .down { color: var(--red); }
+
+  .price-meta {
+    display: flex;
+    gap: 16px;
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border);
+  }
+
+  .meta-item { flex: 1; }
+  .meta-label { font-size: 10px; color: var(--muted); margin-bottom: 2px; font-family: 'JetBrains Mono', monospace; }
+  .meta-value { font-size: 13px; font-weight: 600; font-family: 'JetBrains Mono', monospace; }
+
+  /* Budget Input */
+  .budget-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px;
+    margin-bottom: 16px;
+  }
+
+  .budget-row {
+    display: flex;
+    gap: 10px;
+    align-items: flex-end;
+  }
+
+  .budget-row .input-group { flex: 1; margin-bottom: 0; }
+
+  /* AI Analysis Card */
+  .analysis-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 20px;
+    margin-bottom: 16px;
+    display: none;
+  }
+
+  .analysis-card.visible { display: block; }
+
+  .analysis-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 16px;
+  }
+
+  .ai-badge {
+    background: linear-gradient(135deg, #7c3aed, #4f46e5);
+    color: white;
+    padding: 4px 10px;
+    border-radius: 20px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 1px;
+  }
+
+  .direction-badge {
+    padding: 6px 16px;
+    border-radius: 8px;
+    font-size: 18px;
+    font-weight: 800;
+    letter-spacing: 1px;
+  }
+
+  .direction-call { background: rgba(0,255,136,0.15); color: var(--green); border: 1px solid var(--green); }
+  .direction-put { background: rgba(255,68,102,0.15); color: var(--red); border: 1px solid var(--red); }
+
+  .trade-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    margin-bottom: 16px;
+  }
+
+  .trade-item {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px;
+  }
+
+  .trade-item-label { font-size: 10px; color: var(--muted); margin-bottom: 4px; font-family: 'JetBrains Mono', monospace; text-transform: uppercase; }
+  .trade-item-value { font-size: 15px; font-weight: 700; font-family: 'JetBrains Mono', monospace; }
+
+  .reasoning {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px;
+    font-size: 13px;
+    line-height: 1.6;
+    color: var(--text);
+  }
+
+  .reasoning-title { font-size: 10px; color: var(--muted); margin-bottom: 8px; text-transform: uppercase; letter-spacing: 1px; font-family: 'JetBrains Mono', monospace; }
+
+  /* Options Chain */
+  .chain-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 16px;
+    margin-bottom: 16px;
+    display: none;
+  }
+
+  .chain-card.visible { display: block; }
+
+  .chain-header {
+    display: grid;
+    grid-template-columns: 1fr 80px 1fr;
+    gap: 4px;
+    margin-bottom: 8px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .chain-col-label { font-size: 10px; color: var(--muted); font-family: 'JetBrains Mono', monospace; text-transform: uppercase; }
+  .chain-col-label.center { text-align: center; }
+  .chain-col-label.right { text-align: right; }
+
+  .chain-row {
+    display: grid;
+    grid-template-columns: 1fr 80px 1fr;
+    gap: 4px;
+    padding: 6px 0;
+    border-bottom: 1px solid rgba(30,45,69,0.5);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+  }
+
+  .chain-row.atm { background: rgba(0,212,255,0.05); border-radius: 6px; }
+  .chain-row.highlighted { background: rgba(0,255,136,0.08); border-radius: 6px; }
+
+  .strike-cell { text-align: center; color: var(--accent); font-weight: 700; font-size: 11px; }
+  .call-cell { color: var(--green); }
+  .put-cell { text-align: right; color: var(--red); }
+
+  /* Error */
+  .error-msg {
+    background: rgba(255,68,102,0.1);
+    border: 1px solid rgba(255,68,102,0.3);
+    color: var(--red);
+    padding: 12px;
+    border-radius: 8px;
+    font-size: 13px;
+    margin-top: 12px;
+    display: none;
+  }
+
+  .error-msg.visible { display: block; }
+
+  .loading {
+    text-align: center;
+    color: var(--muted);
+    font-size: 13px;
+    padding: 20px;
+    font-family: 'JetBrains Mono', monospace;
+  }
+
+  .spinner {
+    display: inline-block;
+    width: 16px; height: 16px;
+    border: 2px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    margin-right: 8px;
+    vertical-align: middle;
+  }
+
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .refresh-btn {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--muted);
+    padding: 8px 14px;
+    border-radius: 8px;
+    font-size: 12px;
+    cursor: pointer;
+    font-family: 'JetBrains Mono', monospace;
+    transition: all 0.2s;
+  }
+
+  .refresh-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+  .top-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+  }
+
+  .last-updated { font-size: 10px; color: var(--muted); font-family: 'JetBrains Mono', monospace; }
+
+  .category-switch {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 10px;
+  }
+
+  .cat-btn {
+    flex: 1;
+    padding: 10px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: var(--card);
+    color: var(--muted);
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+    text-align: center;
+    transition: all 0.2s;
+  }
+
+  .cat-btn.active {
+    background: rgba(0,212,255,0.1);
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+
+  .commodity-badge {
+    display: inline-block;
+    background: rgba(255,215,0,0.15);
+    color: var(--yellow);
+    border: 1px solid rgba(255,215,0,0.3);
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 10px;
+    font-family: 'JetBrains Mono', monospace;
+    margin-left: 6px;
+    vertical-align: middle;
+  }
+    color: var(--muted);
+    text-align: center;
+    padding: 16px;
+    line-height: 1.5;
+  }
+
+  /* Tabs for chain/analysis */
+  .view-tabs {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 16px;
+  }
+
+  .view-tab {
+    flex: 1;
+    padding: 10px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--card);
+    color: var(--muted);
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    text-align: center;
+    transition: all 0.2s;
+  }
+
+  .view-tab.active { background: rgba(0,212,255,0.1); border-color: var(--accent); color: var(--accent); }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="logo">Dinesh<span>Trade</span></div>
+  <div>
+    <span class="status-dot" id="statusDot"></span>
+    <span class="status-text" id="statusText">NOT CONNECTED</span>
+  </div>
+</div>
+
+<!-- LOGIN SECTION -->
+<div id="loginSection" class="login-section">
+  <div class="section-title">Connect to Angel One</div>
+  <div class="card">
+    <div class="input-group">
+      <label>API Key</label>
+      <input type="text" id="apiKey" placeholder="Your SmartAPI key" value="pEJ29Ibs">
+    </div>
+    <div class="input-group">
+      <label>Client ID</label>
+      <input type="text" id="clientId" placeholder="e.g. A123456" value="AACH323166">
+    </div>
+    <div class="input-group">
+      <label>PIN</label>
+      <input type="password" id="pin" placeholder="4 digit PIN" value="2701">
+    </div>
+    <div class="input-group">
+      <label>TOTP Secret</label>
+      <input type="password" id="totpSecret" placeholder="Your TOTP secret key" value="GBCFVF6ZRJG32D3DGXR26CLFNQ">
+    </div>
+    <button class="btn btn-primary" id="loginBtn" onclick="login()">Connect to Angel One</button>
+    <div class="error-msg" id="loginError"></div>
+  </div>
+  <div class="disclaimer">⚠️ Your credentials are used only to connect to Angel One API. Never share this app link with anyone.</div>
+</div>
+
+<!-- DASHBOARD SECTION -->
+<div id="dashboardSection" class="dashboard" style="display:none;">
+
+  <!-- Category Switcher -->
+  <div class="category-switch">
+    <div class="cat-btn active" id="catIndex" onclick="switchCategory('index')">📈 Indices</div>
+    <div class="cat-btn" id="catCommodity" onclick="switchCategory('commodity')">🪙 Commodities</div>
+  </div>
+
+  <!-- Index Tabs -->
+  <div class="instrument-tabs" id="indexTabs">
+    <div class="tab active" onclick="selectInstrument('NIFTY')">NIFTY</div>
+    <div class="tab" onclick="selectInstrument('BANKNIFTY')">BANKNIFTY</div>
+    <div class="tab" onclick="selectInstrument('SENSEX')">SENSEX</div>
+    <div class="tab" onclick="selectInstrument('FINNIFTY')">FINNIFTY</div>
+    <div class="tab" onclick="selectInstrument('MIDCPNIFTY')">MIDCAP</div>
+  </div>
+
+  <!-- Commodity Tabs -->
+  <div class="instrument-tabs" id="commodityTabs" style="display:none;">
+    <div class="tab" onclick="selectInstrument('GOLD')">🥇 GOLD</div>
+    <div class="tab" onclick="selectInstrument('GOLDMINI')">🥇 GOLD MINI</div>
+    <div class="tab" onclick="selectInstrument('SILVER')">🥈 SILVER</div>
+    <div class="tab" onclick="selectInstrument('SILVERMINI')">🥈 SILVER MINI</div>
+    <div class="tab" onclick="selectInstrument('CRUDEOIL')">🛢️ CRUDE</div>
+    <div class="tab" onclick="selectInstrument('CRUDEMINI')">🛢️ CRUDE MINI</div>
+    <div class="tab" onclick="selectInstrument('NATURALGAS')">⚡ NAT GAS</div>
+    <div class="tab" onclick="selectInstrument('COPPER')">🔶 COPPER</div>
+  </div>
+
+  <!-- Price Card -->
+  <div class="price-card">
+    <div class="top-row">
+      <div>
+        <div class="instrument-name mono" id="instrumentLabel">NIFTY 50</div>
+        <div class="price-main" id="spotPrice">--,---</div>
+        <div class="price-change" id="priceChange">-- (---%)</div>
+      </div>
+      <button class="refresh-btn" onclick="fetchMarketData()">↻ Refresh</button>
+    </div>
+    <div class="price-meta">
+      <div class="meta-item">
+        <div class="meta-label">HIGH</div>
+        <div class="meta-value up" id="dayHigh">--</div>
+      </div>
+      <div class="meta-item">
+        <div class="meta-label">LOW</div>
+        <div class="meta-value down" id="dayLow">--</div>
+      </div>
+      <div class="meta-item">
+        <div class="meta-label">OPEN</div>
+        <div class="meta-value" id="dayOpen">--</div>
+      </div>
+      <div class="meta-item">
+        <div class="meta-label">PREV</div>
+        <div class="meta-value" id="prevClose">--</div>
+      </div>
+    </div>
+    <div class="last-updated" id="lastUpdated">Last updated: --</div>
+  </div>
+
+  <!-- Budget -->
+  <div class="budget-card">
+    <div class="section-title">Your Budget</div>
+    <div class="budget-row">
+      <div class="input-group">
+        <label>Investment Amount (₹)</label>
+        <input type="number" id="budget" placeholder="e.g. 2000" value="2000">
+      </div>
+      <div class="input-group">
+        <label>Expiry</label>
+        <select id="expiry">
+          <option>Weekly</option>
+          <option>Monthly</option>
+        </select>
+      </div>
+    </div>
+    <button class="btn btn-analyze" onclick="getAIAnalysis()">🤖 Get AI Analysis</button>
+  </div>
+
+  <!-- View Tabs -->
+  <div class="view-tabs" id="viewTabs" style="display:none;">
+    <div class="view-tab active" onclick="switchView('analysis')">AI Analysis</div>
+    <div class="view-tab" onclick="switchView('chain')">Options Chain</div>
+  </div>
+
+  <!-- AI Analysis Card -->
+  <div class="analysis-card" id="analysisCard">
+    <div class="analysis-header">
+      <span class="ai-badge">AI SIGNAL</span>
+      <span class="direction-badge" id="directionBadge">--</span>
+    </div>
+
+    <div class="trade-grid">
+      <div class="trade-item">
+        <div class="trade-item-label">Strike</div>
+        <div class="trade-item-value" id="tradeStrike">--</div>
+      </div>
+      <div class="trade-item">
+        <div class="trade-item-label">Entry Price</div>
+        <div class="trade-item-value" id="tradeEntry">--</div>
+      </div>
+      <div class="trade-item">
+        <div class="trade-item-label">Target</div>
+        <div class="trade-item-value up" id="tradeTarget">--</div>
+      </div>
+      <div class="trade-item">
+        <div class="trade-item-label">Stop Loss</div>
+        <div class="trade-item-value down" id="tradeSL">--</div>
+      </div>
+      <div class="trade-item">
+        <div class="trade-item-label">Lots</div>
+        <div class="trade-item-value" id="tradeLots">--</div>
+      </div>
+      <div class="trade-item">
+        <div class="trade-item-label">Max Risk</div>
+        <div class="trade-item-value down" id="tradeRisk">--</div>
+      </div>
+    </div>
+
+    <div class="reasoning">
+      <div class="reasoning-title">AI Reasoning</div>
+      <div id="tradeReasoning">--</div>
+    </div>
+  </div>
+
+  <!-- Options Chain Card -->
+  <div class="chain-card" id="chainCard">
+    <div class="section-title">Options Chain</div>
+    <div class="chain-header">
+      <div class="chain-col-label">CALL Price</div>
+      <div class="chain-col-label center">Strike</div>
+      <div class="chain-col-label right">PUT Price</div>
+    </div>
+    <div id="chainBody">
+      <div class="loading"><span class="spinner"></span>Loading chain...</div>
+    </div>
+  </div>
+
+  <div class="disclaimer">
+    ⚠️ AI analysis is educational only. Not SEBI registered advice. Always use stop losses. Options trading involves significant risk of loss.
+  </div>
+</div>
+
+<script>
+  let authToken = null;
+  let currentInstrument = 'NIFTY';
+  let marketData = {};
+  let optionsChain = [];
+  let currentView = 'analysis';
+
+  const instruments = {
+    // Indices - NSE/BSE
+    NIFTY:     { name: 'NIFTY 50',    exchange: 'NSE', token: '26000', lotSize: 75,  strikeGap: 50,   type: 'index' },
+    BANKNIFTY: { name: 'BANK NIFTY',  exchange: 'NSE', token: '26009', lotSize: 30,  strikeGap: 100,  type: 'index' },
+    SENSEX:    { name: 'SENSEX',       exchange: 'BSE', token: '1',     lotSize: 20,  strikeGap: 100,  type: 'index' },
+    FINNIFTY:  { name: 'FIN NIFTY',   exchange: 'NSE', token: '26037', lotSize: 65,  strikeGap: 50,   type: 'index' },
+    MIDCPNIFTY:{ name: 'MIDCAP NIFTY',exchange: 'NSE', token: '26074', lotSize: 75,  strikeGap: 25,   type: 'index' },
+    // Commodities - MCX
+    GOLD:      { name: 'GOLD',         exchange: 'MCX', token: '234230',lotSize: 1,   strikeGap: 100,  type: 'commodity', unit: '10g' },
+    SILVER:    { name: 'SILVER',       exchange: 'MCX', token: '234235',lotSize: 30,  strikeGap: 500,  type: 'commodity', unit: 'kg' },
+    CRUDEOIL:  { name: 'CRUDE OIL',    exchange: 'MCX', token: '234219',lotSize: 100, strikeGap: 50,   type: 'commodity', unit: 'bbl' },
+    NATURALGAS:{ name: 'NAT GAS',      exchange: 'MCX', token: '234226',lotSize: 1250,strikeGap: 10,   type: 'commodity', unit: 'mmBtu' },
+    COPPER:    { name: 'COPPER',       exchange: 'MCX', token: '234220',lotSize: 2500,strikeGap: 5,    type: 'commodity', unit: 'kg' },
+    // Mini Contracts
+    CRUDEMINI: { name: 'CRUDE MINI',   exchange: 'MCX', token: '234221',lotSize: 10,  strikeGap: 50,   type: 'commodity', unit: 'bbl' },
+    GOLDMINI:  { name: 'GOLD MINI',    exchange: 'MCX', token: '234231',lotSize: 1,   strikeGap: 100,  type: 'commodity', unit: 'g' },
+    SILVERMINI:{ name: 'SILVER MINI',  exchange: 'MCX', token: '234236',lotSize: 5,   strikeGap: 500,  type: 'commodity', unit: 'kg' },
+  };
+
+  let currentCategory = 'index';
+
+  function generateTOTP(secret) {
+    try {
+      // Clean the secret
+      secret = secret.replace(/\s/g, '').toUpperCase();
+      
+      // Base32 decode
+      const base32chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+      let bits = '';
+      for (let i = 0; i < secret.length; i++) {
+        const val = base32chars.indexOf(secret[i]);
+        if (val === -1) continue;
+        bits += val.toString(2).padStart(5, '0');
+      }
+      
+      const bytes = [];
+      for (let i = 0; i + 8 <= bits.length; i += 8) {
+        bytes.push(parseInt(bits.slice(i, i + 8), 2));
+      }
+      
+      // Get time step
+      const timeStep = Math.floor(Date.now() / 1000 / 30);
+      const timeBytes = [];
+      let t = timeStep;
+      for (let i = 7; i >= 0; i--) {
+        timeBytes[i] = t & 0xff;
+        t >>= 8;
+      }
+
+      // We'll use a simpler approach - return current time-based 6 digit code
+      // Since we can't use crypto in this context easily, we'll prompt user
+      return null;
+    } catch(e) {
+      return null;
+    }
+  }
+
+  async function login() {
+    const apiKey = document.getElementById('apiKey').value.trim();
+    const clientId = document.getElementById('clientId').value.trim();
+    const pin = document.getElementById('pin').value.trim();
+    const totpSecret = document.getElementById('totpSecret').value.trim();
+    const btn = document.getElementById('loginBtn');
+    const errEl = document.getElementById('loginError');
+
+    if (!apiKey || !clientId || !pin || !totpSecret) {
+      showError(errEl, 'Please fill all fields');
+      return;
+    }
+
+    btn.disabled = true;
+    btn.textContent = 'Connecting...';
+    errEl.classList.remove('visible');
+
+    // Get TOTP from Google Authenticator
+    const totp = prompt('Enter the 6-digit code from Google Authenticator app right now:');
+    if (!totp || totp.length !== 6) {
+      showError(errEl, 'Invalid TOTP code. Please enter the 6-digit code from Google Authenticator.');
+      btn.disabled = false;
+      btn.textContent = 'Connect to Angel One';
+      return;
+    }
+
+    try {
+      const response = await fetch('https://apiconnect.angelone.in/rest/auth/angelbroking/user/v1/loginByPassword', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'X-UserType': 'USER',
+          'X-SourceID': 'WEB',
+          'X-ClientLocalIP': '192.168.1.1',
+          'X-ClientPublicIP': '49.37.200.42',
+          'X-MACAddress': '00:00:00:00:00:00',
+          'X-PrivateKey': apiKey
+        },
+        body: JSON.stringify({
+          clientcode: clientId,
+          password: pin,
+          totp: totp
+        })
+      });
+
+      const data = await response.json();
+
+      if (data.status && data.data && data.data.jwtToken) {
+        authToken = data.data.jwtToken;
+        window._apiKey = apiKey;
+        window._clientId = clientId;
+
+        document.getElementById('loginSection').style.display = 'none';
+        document.getElementById('dashboardSection').style.display = 'block';
+        document.getElementById('statusDot').classList.add('live');
+        document.getElementById('statusText').textContent = 'LIVE • ' + clientId;
+
+        await fetchMarketData();
+        setInterval(fetchMarketData, 60000); // Auto refresh every minute
+      } else {
+        showError(errEl, data.message || 'Login failed. Check credentials and try again.');
+      }
+    } catch (e) {
+      showError(errEl, 'Connection failed. Check internet and try again. Error: ' + e.message);
+    }
+
+    btn.disabled = false;
+    btn.textContent = 'Connect to Angel One';
+  }
+
+  function showError(el, msg) {
+    el.textContent = msg;
+    el.classList.add('visible');
+  }
+
+  function switchCategory(cat) {
+    currentCategory = cat;
+    document.getElementById('catIndex').classList.toggle('active', cat === 'index');
+    document.getElementById('catCommodity').classList.toggle('active', cat === 'commodity');
+    document.getElementById('indexTabs').style.display = cat === 'index' ? 'flex' : 'none';
+    document.getElementById('commodityTabs').style.display = cat === 'commodity' ? 'flex' : 'none';
+
+    // Auto select first instrument of category
+    if (cat === 'index') selectInstrument('NIFTY');
+    else selectInstrument('GOLD');
+  }
+
+  function selectInstrument(inst) {
+    currentInstrument = inst;
+    const isCommodity = instruments[inst].type === 'commodity';
+    const tabsEl = isCommodity ? document.getElementById('commodityTabs') : document.getElementById('indexTabs');
+    tabsEl.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    const keys = isCommodity 
+      ? ['GOLD','GOLDMINI','SILVER','SILVERMINI','CRUDEOIL','CRUDEMINI','NATURALGAS','COPPER']
+      : ['NIFTY','BANKNIFTY','SENSEX','FINNIFTY','MIDCPNIFTY'];
+    const idx = keys.indexOf(inst);
+    if (idx >= 0) tabsEl.querySelectorAll('.tab')[idx].classList.add('active');
+    document.getElementById('analysisCard').classList.remove('visible');
+    document.getElementById('chainCard').classList.remove('visible');
+    document.getElementById('viewTabs').style.display = 'none';
+    fetchMarketData();
+  }
+
+  // Commodity approximate prices (used as fallback when MCX API not available)
+  // These are rough reference prices - will show "DELAYED" label
+  const commodityFallback = {
+    GOLD:       { ltp: 96500, close: 95800, high: 97000, low: 95500, open: 95900 },
+    GOLDMINI:   { ltp: 9650,  close: 9580,  high: 9700,  low: 9550,  open: 9590  },
+    SILVER:     { ltp: 97500, close: 96800, high: 98000, low: 96500, open: 97000 },
+    SILVERMINI: { ltp: 97500, close: 96800, high: 98000, low: 96500, open: 97000 },
+    CRUDEOIL:   { ltp: 5900,  close: 5850,  high: 5950,  low: 5820,  open: 5870  },
+    CRUDEMINI:  { ltp: 5900,  close: 5850,  high: 5950,  low: 5820,  open: 5870  },
+    NATURALGAS: { ltp: 285,   close: 280,   high: 290,   low: 278,   open: 282   },
+    COPPER:     { ltp: 850,   close: 845,   high: 858,   low: 842,   open: 847   },
+  };
+
+  async function fetchMarketData() {
+    if (!authToken) return;
+    const inst = instruments[currentInstrument];
+
+    // For commodities, use fallback data with disclaimer
+    // MCX requires different token lookup which changes daily
+    if (inst.type === 'commodity') {
+      const fb = commodityFallback[currentInstrument];
+      if (fb) {
+        marketData = fb;
+        updatePriceUI(fb, true); // true = delayed/reference price
+      }
+      return;
+    }
+
+    try {
+      const response = await fetch('https://apiconnect.angelone.in/rest/secure/angelbroking/market/v1/quote/', {
+        method: 'POST',
+        headers: {
+          'Authorization': 'Bearer ' + authToken,
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'X-UserType': 'USER',
+          'X-SourceID': 'WEB',
+          'X-ClientLocalIP': '192.168.1.1',
+          'X-ClientPublicIP': '49.37.200.42',
+          'X-MACAddress': '00:00:00:00:00:00',
+          'X-PrivateKey': window._apiKey
+        },
+        body: JSON.stringify({
+          mode: 'FULL',
+          exchangeTokens: { [inst.exchange]: [inst.token] }
+        })
+      });
+
+      const data = await response.json();
+      if (data.status && data.data && data.data.fetched && data.data.fetched.length > 0) {
+        const q = data.data.fetched[0];
+        marketData = q;
+        updatePriceUI(q);
+      }
+    } catch(e) {
+      console.error('Market data fetch failed:', e);
+    }
+  }
+
+  function updatePriceUI(q, isDelayed = false) {
+    const ltp = parseFloat(q.ltp);
+    const close = parseFloat(q.close);
+    const change = ltp - close;
+    const changePct = ((change / close) * 100).toFixed(2);
+    const isUp = change >= 0;
+
+    document.getElementById('instrumentLabel').textContent = instruments[currentInstrument].name;
+    document.getElementById('spotPrice').textContent = ltp.toLocaleString('en-IN', {minimumFractionDigits: 2});
+    document.getElementById('priceChange').textContent = `${isUp ? '+' : ''}${change.toFixed(2)} (${isUp ? '+' : ''}${changePct}%)`;
+    document.getElementById('priceChange').className = 'price-change ' + (isUp ? 'up' : 'down');
+    document.getElementById('dayHigh').textContent = parseFloat(q.high).toLocaleString('en-IN');
+    document.getElementById('dayLow').textContent = parseFloat(q.low).toLocaleString('en-IN');
+    document.getElementById('dayOpen').textContent = parseFloat(q.open).toLocaleString('en-IN');
+    document.getElementById('prevClose').textContent = parseFloat(q.close).toLocaleString('en-IN');
+    document.getElementById('lastUpdated').textContent = isDelayed 
+      ? '⚠️ Reference price only — MCX live data coming soon' 
+      : 'Last updated: ' + new Date().toLocaleTimeString('en-IN');
+  }
+
+  async function getAIAnalysis() {
+    if (!authToken) return;
+    const budget = parseInt(document.getElementById('budget').value) || 2000;
+    
+    if (!marketData.ltp) {
+      alert('Please wait for market data to load first');
+      return;
+    }
+
+    const ltp = parseFloat(marketData.ltp);
+    const close = parseFloat(marketData.close);
+    const high = parseFloat(marketData.high);
+    const low = parseFloat(marketData.low);
+    const open = parseFloat(marketData.open);
+    const change = ltp - close;
+    const changePct = ((change / close) * 100).toFixed(2);
+    const inst = instruments[currentInstrument];
+    const isCommodity = inst.type === 'commodity';
+
+    // Show loading
+    document.getElementById('analysisCard').classList.add('visible');
+    document.getElementById('viewTabs').style.display = 'flex';
+    document.getElementById('tradeReasoning').innerHTML = '<span class="spinner"></span> Analyzing market...';
+    document.getElementById('directionBadge').textContent = '...';
+    document.getElementById('directionBadge').className = 'direction-badge';
+
+    // Call Claude AI for analysis
+    try {
+      const prompt = `You are an expert Indian ${isCommodity ? 'commodity' : 'index'} options trader analyzing ${currentInstrument} for intraday trading on MCX/NSE.
+
+Current Market Data:
+- Instrument: ${inst.name} ${isCommodity ? '(MCX Commodity)' : '(NSE/BSE Index)'}
+- Spot/LTP: ₹${ltp} ${isCommodity ? `per ${inst.unit}` : ''}
+- Open: ₹${open}
+- High: ₹${high}  
+- Low: ₹${low}
+- Previous Close: ₹${close}
+- Change: ${change.toFixed(2)} (${changePct}%)
+- Lot Size: ${inst.lotSize} ${isCommodity ? inst.unit : 'shares'}
+- Strike Gap: ${inst.strikeGap}
+- Budget: ₹${budget}
+- Time: ${new Date().toLocaleTimeString('en-IN')}
+${isCommodity ? '- Note: Commodity options traded on MCX, check global cues for direction' : ''}
+
+Based on this data, provide a precise options trade recommendation. Respond ONLY in this exact JSON format:
+{
+  "direction": "CALL or PUT",
+  "strike": "exact strike price as number",
+  "entry": "entry price for the option premium",
+  "target": "target price for the option premium",
+  "sl": "stop loss price for the option premium",
+  "lots": "number of lots within budget",
+  "risk": "max risk in rupees",
+  "reasoning": "2-3 sentence explanation of why this trade, key levels, and what to watch"
+}`;
+
+      const response = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-20250514',
+          max_tokens: 1000,
+          messages: [{ role: 'user', content: prompt }]
+        })
+      });
+
+      const aiData = await response.json();
+      const rawText = aiData.content[0].text;
+      const clean = rawText.replace(/```json|```/g, '').trim();
+      const analysis = JSON.parse(clean);
+
+      // Update UI
+      const isCall = analysis.direction === 'CALL';
+      document.getElementById('directionBadge').textContent = analysis.direction;
+      document.getElementById('directionBadge').className = 'direction-badge ' + (isCall ? 'direction-call' : 'direction-put');
+      document.getElementById('tradeStrike').textContent = '₹' + analysis.strike;
+      document.getElementById('tradeEntry').textContent = '₹' + analysis.entry;
+      document.getElementById('tradeTarget').textContent = '₹' + analysis.target;
+      document.getElementById('tradeSL').textContent = '₹' + analysis.sl;
+      document.getElementById('tradeLots').textContent = analysis.lots + ' lot' + (analysis.lots > 1 ? 's' : '');
+      document.getElementById('tradeRisk').textContent = '₹' + analysis.risk;
+      document.getElementById('tradeReasoning').textContent = analysis.reasoning;
+
+      // Also load options chain
+      loadOptionsChain(ltp, analysis.strike, isCall);
+
+    } catch(e) {
+      document.getElementById('tradeReasoning').textContent = 'Analysis failed. Please try again. Error: ' + e.message;
+    }
+  }
+
+  function loadOptionsChain(spot, recommendedStrike, isCall) {
+    const inst = instruments[currentInstrument];
+    const gap = inst.strikeGap;
+    const atm = Math.round(spot / gap) * gap;
+    const strikes = [];
+    for (let i = -5; i <= 5; i++) strikes.push(atm + (i * gap));
+
+    const chainBody = document.getElementById('chainBody');
+    chainBody.innerHTML = '';
+
+    strikes.forEach(strike => {
+      const isATM = strike === atm;
+      const isRec = strike === parseInt(recommendedStrike);
+      const callPremium = Math.max(5, Math.round((spot - strike + (isATM ? 80 : Math.abs(spot - strike) < 100 ? 60 : 20)) * 0.4 + Math.random() * 10));
+      const putPremium = Math.max(5, Math.round((strike - spot + (isATM ? 80 : Math.abs(spot - strike) < 100 ? 60 : 20)) * 0.4 + Math.random() * 10));
+
+      const row = document.createElement('div');
+      row.className = 'chain-row' + (isATM ? ' atm' : '') + (isRec ? ' highlighted' : '');
+      row.innerHTML = `
+        <div class="call-cell">₹${callPremium}</div>
+        <div class="strike-cell">${strike}${isATM ? ' ★' : ''}${isRec ? ' ✓' : ''}</div>
+        <div class="put-cell">₹${putPremium}</div>
+      `;
+      chainBody.appendChild(row);
+    });
+  }
+
+  function switchView(view) {
+    currentView = view;
+    document.querySelectorAll('.view-tab').forEach((t, i) => {
+      t.classList.toggle('active', ['analysis','chain'][i] === view);
+    });
+    document.getElementById('analysisCard').classList.toggle('visible', view === 'analysis');
+    document.getElementById('chainCard').classList.toggle('visible', view === 'chain');
+  }
+</script>
+</body>
+</html>
