@@ -1,4 +1,4 @@
-use strict';
+'use strict';
 // ═══════════════════════════════════════════════════════════════════════════════
 // DineshTrade v2.1 — Corrected Server
 // Instruments : NIFTY · BANKNIFTY · SENSEX
