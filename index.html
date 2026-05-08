@@ -426,6 +426,7 @@ header{
           <div class="trade-item"><div class="trade-lbl">SL</div><div class="trade-val" id="tSl" style="color:var(--red)">—</div></div>
           <div class="trade-item"><div class="trade-lbl">LOTS</div><div class="trade-val" id="tLots">—</div></div>
         </div>
+        <div id="trailNote" style="display:none;font-family:var(--mono);font-size:10px;color:var(--yellow);margin-bottom:6px;padding:4px 8px;background:rgba(255,209,102,.08);border-radius:4px;border-left:2px solid var(--yellow)"></div>
         <div class="pnl-bar"><div class="pnl-fill" id="pnlBar" style="width:50%"></div></div>
         <div style="display:flex;justify-content:space-between;margin-bottom:10px">
           <span style="font-size:11px;color:var(--muted);font-family:var(--mono)" id="tHeld">—</span>
@@ -514,6 +515,10 @@ header{
         <div><div class="setting-label">Paper Mode</div><div class="setting-hint">No real money</div></div>
         <div class="toggle on" id="togglePaper" onclick="togglePaperMode()"></div>
       </div>
+      <div class="setting-row">
+        <div><div class="setting-label">Trailing Stop Loss</div><div class="setting-hint">Auto-raise SL when up 20%+</div></div>
+        <div class="toggle on" id="toggleTrailSL" onclick="toggleTrailingSL()"></div>
+      </div>
     </div>
     <button class="btn-save" onclick="saveSettings()">SAVE SETTINGS</button>
   </div><!-- /page-settings -->
@@ -597,6 +602,13 @@ socket.on('botStatus', ({ on, paused, reason }) => {
   renderBotStatus(reason);
 });
 socket.on('cfg', (c) => { state.cfg = c; paperMode = c.paperMode; applySettings(c); });
+socket.on('wsStatus', ({ alive }) => {
+  const dot = document.querySelector('.ws-dot');
+  if (dot) {
+    dot.classList.toggle('live', alive);
+    dot.title = alive ? 'SmartStream WebSocket: LIVE' : 'REST polling only';
+  }
+});
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // RENDER — PRICE
@@ -811,6 +823,13 @@ function renderTrade() {
   document.getElementById('tSl').textContent     = `₹${t.sl}`;
   document.getElementById('tLots').textContent   = t.lots;
 
+  // Trailing SL note
+  const trailEl = document.getElementById('trailNote');
+  if (trailEl) {
+    if (t.trailNote) { trailEl.style.display = 'block'; trailEl.textContent = '📈 ' + t.trailNote; }
+    else             { trailEl.style.display = 'none'; }
+  }
+
   const pnl    = t.pnl || 0;
   const pnlEl  = document.getElementById('tPnl');
   pnlEl.textContent = `${pnl >= 0 ? '+' : ''}₹${Math.round(pnl).toLocaleString('en-IN')}`;
@@ -953,11 +972,20 @@ function applySettings(c) {
   }
   paperMode = c.paperMode ?? true;
   document.getElementById('togglePaper').className = 'toggle' + (paperMode ? ' on' : '');
+  const trailEl = document.getElementById('toggleTrailSL');
+  if (trailEl) trailEl.className = 'toggle' + ((c.trailingSL ?? true) ? ' on' : '');
 }
+
+let trailingSL = true;
 
 function togglePaperMode() {
   paperMode = !paperMode;
   document.getElementById('togglePaper').className = 'toggle' + (paperMode ? ' on' : '');
+}
+
+function toggleTrailingSL() {
+  trailingSL = !trailingSL;
+  document.getElementById('toggleTrailSL').className = 'toggle' + (trailingSL ? ' on' : '');
 }
 
 function saveSettings() {
@@ -971,6 +999,7 @@ function saveSettings() {
     breakoutBuf: parseFloat(document.getElementById('set_breakoutBuf').value),
     capital:     parseFloat(document.getElementById('set_capital').value),
     paperMode,
+    trailingSL,
   };
   fetch('/api/tune', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) })
     .then(() => { document.getElementById('modeBadge').textContent = paperMode ? 'PAPER' : 'LIVE';
