@@ -382,6 +382,15 @@ header{
       </div>
     </div>
 
+    <!-- Candlestick Chart -->
+    <div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:10px;margin-bottom:10px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+        <span style="font-family:var(--mono);font-size:10px;font-weight:700;color:var(--muted);letter-spacing:.5px">1-MIN CANDLES</span>
+        <span style="font-family:var(--mono);font-size:9px;color:var(--muted)" id="chartInfo">—</span>
+      </div>
+      <canvas id="candleChart" style="width:100%;height:160px;display:block;border-radius:4px"></canvas>
+    </div>
+
   </div><!-- /page-market -->
 
   <!-- PAGE: Bot -->
@@ -641,6 +650,137 @@ function renderPrice(p) {
   document.getElementById('indVwap').textContent = p.vwap ? Number(p.vwap).toLocaleString('en-IN') : '—';
   const rsiEl = document.getElementById('indRsi');
   rsiEl.style.color = p.rsi > 60 ? 'var(--green)' : p.rsi < 40 ? 'var(--red)' : 'var(--text)';
+
+  // Candle chart
+  if (p.candles && p.candles.length > 0) drawCandleChart(p.candles, p.vwap, p.ema9);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// CANDLE CHART (Canvas 2D — 1-min OHLC)
+// ═══════════════════════════════════════════════════════════════════════════════
+function drawCandleChart(candles, vwap, ema9) {
+  const canvas = document.getElementById('candleChart');
+  if (!canvas) return;
+
+  // DPI-aware sizing
+  const dpr = window.devicePixelRatio || 1;
+  const W   = canvas.offsetWidth  || canvas.parentElement.offsetWidth || 360;
+  const H   = canvas.offsetHeight || 160;
+  canvas.width  = W * dpr;
+  canvas.height = H * dpr;
+  canvas.style.width  = W + 'px';
+  canvas.style.height = H + 'px';
+
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+
+  // Show last 60 candles max
+  const display = candles.slice(-60);
+  const n = display.length;
+  if (n < 2) {
+    ctx.fillStyle = '#5a6080';
+    ctx.font = '11px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('Waiting for candle data…', W / 2, H / 2);
+    document.getElementById('chartInfo').textContent = '—';
+    return;
+  }
+
+  const PAD = { top: 8, bottom: 22, left: 4, right: 50 };
+  const cW   = W - PAD.left - PAD.right;
+  const cH   = H - PAD.top - PAD.bottom;
+
+  // Price range with 5% padding
+  let minP = Math.min(...display.map(c => c.low));
+  let maxP = Math.max(...display.map(c => c.high));
+  const range = maxP - minP || 1;
+  minP -= range * 0.05;
+  maxP += range * 0.05;
+
+  const toY  = (price) => PAD.top + cH - ((price - minP) / (maxP - minP)) * cH;
+  const barW = Math.max(1, Math.floor(cW / n) - 1);
+  const step = cW / n;
+
+  // Background
+  ctx.fillStyle = '#111318';
+  ctx.fillRect(0, 0, W, H);
+
+  // Grid lines (3 horizontal)
+  ctx.strokeStyle = '#1e2130';
+  ctx.lineWidth   = 1;
+  for (let i = 0; i <= 3; i++) {
+    const y = PAD.top + (cH / 3) * i;
+    ctx.beginPath(); ctx.moveTo(PAD.left, y); ctx.lineTo(W - PAD.right, y); ctx.stroke();
+    const price = maxP - ((maxP - minP) / 3) * i;
+    ctx.fillStyle = '#5a6080';
+    ctx.font = '8px monospace';
+    ctx.textAlign = 'left';
+    ctx.fillText(price.toFixed(0), W - PAD.right + 3, y + 3);
+  }
+
+  // VWAP line
+  if (vwap && vwap > minP && vwap < maxP) {
+    const vy = toY(vwap);
+    ctx.strokeStyle = '#ffd166';
+    ctx.lineWidth   = 1;
+    ctx.setLineDash([3, 3]);
+    ctx.beginPath(); ctx.moveTo(PAD.left, vy); ctx.lineTo(W - PAD.right, vy); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = '#ffd166';
+    ctx.font = '8px monospace';
+    ctx.textAlign = 'left';
+    ctx.fillText('VWAP', W - PAD.right + 3, vy - 2);
+  }
+
+  // EMA9 line
+  if (ema9 && ema9 > minP && ema9 < maxP) {
+    const ey = toY(ema9);
+    ctx.strokeStyle = '#00d4ff';
+    ctx.lineWidth   = 1;
+    ctx.setLineDash([2, 4]);
+    ctx.beginPath(); ctx.moveTo(PAD.left, ey); ctx.lineTo(W - PAD.right, ey); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = '#00d4ff';
+    ctx.font = '8px monospace';
+    ctx.textAlign = 'left';
+    ctx.fillText('EMA9', W - PAD.right + 3, ey + 9);
+  }
+
+  // Candles
+  for (let i = 0; i < n; i++) {
+    const c   = display[i];
+    const x   = PAD.left + i * step + step / 2;
+    const bull = c.close >= c.open;
+    const col  = bull ? '#4fffb0' : '#ff4d6d';
+
+    // Wick
+    ctx.strokeStyle = col;
+    ctx.lineWidth   = 1;
+    ctx.beginPath();
+    ctx.moveTo(x, toY(c.high));
+    ctx.lineTo(x, toY(c.low));
+    ctx.stroke();
+
+    // Body
+    const bodyTop = toY(Math.max(c.open, c.close));
+    const bodyBot = toY(Math.min(c.open, c.close));
+    const bodyH   = Math.max(1, bodyBot - bodyTop);
+    ctx.fillStyle = col;
+    ctx.fillRect(x - barW / 2, bodyTop, barW, bodyH);
+  }
+
+  // Time labels for first and last candle
+  const fmtTime = (ts) => {
+    const d = new Date(ts);
+    return d.toLocaleTimeString('en-IN', { hour:'2-digit', minute:'2-digit', timeZone:'Asia/Kolkata' });
+  };
+  ctx.fillStyle = '#5a6080';
+  ctx.font = '8px monospace';
+  ctx.textAlign = 'center';
+  if (display[0]?.time)       ctx.fillText(fmtTime(display[0].time),       PAD.left + step/2,       H - 5);
+  if (display[n-1]?.time)     ctx.fillText(fmtTime(display[n-1].time),     PAD.left + (n-1)*step + step/2, H - 5);
+
+  document.getElementById('chartInfo').textContent = `${n} candles`;
 }
 
 function updateTabLtp(key, ltp, bull, stale) {
