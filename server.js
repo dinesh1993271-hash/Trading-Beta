@@ -559,7 +559,8 @@ function getNearestExpiry(key) {
   const expDate = new Date(now.getTime() + daysAhead * 86400000);
   const months = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
 
-  return `${String(expDate.getDate()).padStart(2,'0')}${months[expDate.getMonth()]}${expDate.getFullYear()}`;
+  // Angel One optionChain API requires DD-MMM-YYYY format
+  return `${String(expDate.getDate()).padStart(2,'0')}-${months[expDate.getMonth()]}-${expDate.getFullYear()}`;
 }
 
 function calcMaxPain(chain) {
@@ -747,6 +748,13 @@ async function placeTrade(key, quote, dir, bull) {
   }
   if (!entry || entry < 1) return;
 
+  // ─── FIX: Compute lots FIRST so partial fill check can reference it ────────
+  const confidence = bull >= 70 || bull <= 30 ? 'HIGH' : bull >= 63 || bull <= 37 ? 'MED' : 'BASE';
+  const pct        = confidence === 'HIGH' ? cfg.highPct : confidence === 'MED' ? cfg.medPct : cfg.basePct;
+  const capital    = cfg.capital * pct;
+  const lotCost    = entry * inst.lotSize;
+  const lots       = Math.max(1, Math.floor(lotCost > 0 ? capital / lotCost : 1));
+
   // ═══════════════════════════════════════════════════════════════════════════════
   // REALISTIC PAPER: Simulate live execution flaws
   // ═══════════════════════════════════════════════════════════════════════════════
@@ -754,7 +762,7 @@ async function placeTrade(key, quote, dir, bull) {
   let filledLots = null;
 
   // 1. Simulate order rejection (2% chance)
-  if (cfg.paperMode && Math.random() < cfg.paperOrderReject) {
+  if (cfg.paperMode && Math.random() < (cfg.paperOrderReject || 0)) {
     logFilter(key, dir, bull, `Order REJECTED by broker (simulated live rejection)`);
     console.log(`🚫 [REJECTED] ${key} ${dir} — simulated broker rejection`);
     return;
@@ -763,26 +771,25 @@ async function placeTrade(key, quote, dir, bull) {
   // 2. Simulate slippage (entry worse than expected)
   let slippedEntry = entry;
   if (cfg.paperMode) {
-    const slipPct = cfg.paperSlippagePct / 100;
-    // OTM has more slippage
-    const isOTM = (dir === 'CALL' && strike > atm) || (dir === 'PUT' && strike < atm);
-    const extraSlip = isOTM ? (cfg.paperSpreadOTM / 100) : 0;
+    const slipPct   = (cfg.paperSlippagePct || 0) / 100;
+    const isOTM     = (dir === 'CALL' && strike > atm) || (dir === 'PUT' && strike < atm);
+    const extraSlip = isOTM ? ((cfg.paperSpreadOTM || 0) / 100) : 0;
     const totalSlip = slipPct + extraSlip;
-    slippedEntry = Math.round(entry * (1 + totalSlip));
+    slippedEntry    = Math.round(entry * (1 + totalSlip));
     if (slippedEntry > entry) {
       executionNote += `Slippage: ₹${entry} → ₹${slippedEntry} (+${(totalSlip*100).toFixed(1)}%). `;
     }
   }
 
-  // 3. Simulate partial fill (5% chance)
-  if (cfg.paperMode && Math.random() < cfg.paperPartialFill) {
-    filledLots = Math.max(1, Math.floor(lots * 0.5)); // 50% fill
+  // 3. Simulate partial fill (5% chance) — lots is now defined above
+  if (cfg.paperMode && Math.random() < (cfg.paperPartialFill || 0)) {
+    filledLots = Math.max(1, Math.floor(lots * 0.5));
     executionNote += `Partial fill: ${filledLots}/${lots} lots. `;
   }
 
   // 4. Margin check (even in paper)
   if (cfg.paperMode && cfg.paperMarginRequired) {
-    const marginRequired = slippedEntry * (filledLots || lots) * inst.lotSize * 1.2; // 20% buffer
+    const marginRequired = slippedEntry * (filledLots || lots) * inst.lotSize * 1.2;
     if (marginRequired > cfg.capital) {
       logFilter(key, dir, bull, `Margin insufficient: need ₹${Math.round(marginRequired)}, have ₹${cfg.capital}`);
       console.log(`🚫 [MARGIN] ${key} ${dir} — need ₹${Math.round(marginRequired)}, have ₹${cfg.capital}`);
@@ -791,11 +798,10 @@ async function placeTrade(key, quote, dir, bull) {
   }
 
   // 5. Daily loss kill switch
-  if (cfg.paperMode && cfg.paperMaxDailyLoss > 0) {
-    // Reset daily tracking if new day
+  if (cfg.paperMode && (cfg.paperMaxDailyLoss || 0) > 0) {
     const today = new Date().toDateString();
     if (paperLastResetDate !== today) {
-      paperDailyPnl = 0;
+      paperDailyPnl    = 0;
       paperDailyTrades = 0;
       paperLastResetDate = today;
     }
@@ -807,12 +813,6 @@ async function placeTrade(key, quote, dir, bull) {
       return;
     }
   }
-
-  const confidence = bull >= 70 || bull <= 30 ? 'HIGH' : bull >= 63 || bull <= 37 ? 'MED' : 'BASE';
-  const pct = confidence === 'HIGH' ? cfg.highPct : confidence === 'MED' ? cfg.medPct : cfg.basePct;
-  const capital = cfg.capital * pct;
-  const lotCost = slippedEntry * inst.lotSize;
-  const lots = Math.max(1, Math.floor(capital / lotCost));
 
   const sl = Math.round(slippedEntry * cfg.slPct);
   const target = Math.round(slippedEntry * cfg.targetPct);
@@ -1224,7 +1224,7 @@ async function initSystems() {
 
   setTimeout(() => fetchOptionChain(activeInst), 3000);
 
-  tickTimer = setInterval(masterTick, 3000);
+  tickTimer = setInterval(masterTick, 1000);
   masterTick();
 
   setInterval(() => {
@@ -1235,5 +1235,5 @@ async function initSystems() {
     await login();
   }, 6 * 60 * 60 * 1000);
 
-  console.log('✅ All systems go. Tick: 3s | OI: 3min | WS: disabled (REST only)');
+  console.log('✅ All systems go. Tick: 1s | OI: 3min | WS: disabled (REST only)');
 }
